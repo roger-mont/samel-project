@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="FSR Matrix — Monitoramento de pressão em tempo real com mapa de calor e alerta de postura">
+    <title>FSR Matrix — Pressure Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script type="text/javascript" src="/eel.js"></script>
+</head>
+<body>
+    <!-- Alerta overlay -->
+    <div id="alert-overlay" class="alert-overlay hidden">
+        <div class="alert-card">
+            <div class="alert-icon">⚠️</div>
+            <h2 class="alert-title">Posição Estática Detectada</h2>
+            <p class="alert-message">Você está na mesma posição há mais de <span id="alert-time">1:00</span>.</p>
+            <p class="alert-sub">Mova-se para redistribuir a pressão.</p>
+            <button id="alert-dismiss" class="alert-btn" onclick="dismissAlert()">Entendi</button>
+        </div>
+    </div>
+
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-mark">
+                    <span class="logo-icon">◉</span>
+                    <span class="logo-text">FSR Matrix</span>
+                </div>
+                <span class="version-tag">v1.0</span>
+            </div>
+
+            <div class="sidebar-section">
+                <h3 class="section-title">
+                    <span class="section-icon">⚡</span>
+                    Status
+                </h3>
+                <div class="status-indicator" id="status-indicator">
+                    <span class="status-dot disconnected" id="status-dot"></span>
+                    <span class="status-text" id="status-text">Desconectado</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3 class="section-title">
+                    <span class="section-icon">🔧</span>
+                    Calibração
+                </h3>
+                <div class="calibration-grid">
+                    <div class="calib-field">
+                        <label for="calib-vcc">VCC (V)</label>
+                        <input type="number" id="calib-vcc" data-key="vcc" value="5.0" step="0.1" min="0">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-adc">Resolução ADC</label>
+                        <input type="number" id="calib-adc" data-key="adc_resolution" value="255" step="1" min="1">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-pulldown">R Pull-Down (Ω)</label>
+                        <input type="number" id="calib-pulldown" data-key="pulldown_resistor" value="10000" step="100" min="1">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-factor-m">Fator M</label>
+                        <input type="number" id="calib-factor-m" data-key="factor_m" value="1.0" step="0.01">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-offset-b">Offset B</label>
+                        <input type="number" id="calib-offset-b" data-key="offset_b" value="0.0" step="0.01">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-deadzone">Deadzone (N)</label>
+                        <input type="number" id="calib-deadzone" data-key="deadzone_threshold" value="0.05" step="0.01" min="0">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-ema">EMA Alpha</label>
+                        <input type="number" id="calib-ema" data-key="ema_alpha" value="0.3" step="0.05" min="0.01" max="1">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-tolerance">Tolerância Postura</label>
+                        <input type="number" id="calib-tolerance" data-key="posture_tolerance" value="0.15" step="0.01" min="0" max="1">
+                    </div>
+                    <div class="calib-field">
+                        <label for="calib-timeout">Timeout Postura (s)</label>
+                        <input type="number" id="calib-timeout" data-key="posture_timeout_seconds" value="60" step="5" min="5">
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <span class="footer-text">Projeto Walter</span>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top bar -->
+            <header class="top-bar">
+                <h1 class="page-title">Espectro de Pressão</h1>
+                <div class="top-bar-stats">
+                    <div class="stat-chip" id="grid-size-chip">
+                        <span class="chip-label">Grid</span>
+                        <span class="chip-value" id="grid-size">3×3</span>
+                    </div>
+                    <div class="stat-chip" id="fps-chip">
+                        <span class="chip-label">FPS</span>
+                        <span class="chip-value" id="fps-value">--</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard cards -->
+            <div class="dashboard-row">
+                <div class="dash-card weight-card" id="weight-card">
+                    <div class="card-icon">⚖️</div>
+                    <div class="card-body">
+                        <span class="card-label">Peso Estimado</span>
+                        <div class="card-value-row">
+                            <span class="card-value" id="weight-value">0.00</span>
+                            <span class="card-unit">Kg</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="dash-card timer-card" id="timer-card">
+                    <div class="card-icon">⏱️</div>
+                    <div class="card-body">
+                        <span class="card-label">Tempo Parado</span>
+                        <div class="card-value-row">
+                            <span class="card-value" id="timer-value">0:00</span>
+                        </div>
+                    </div>
+                    <div class="timer-progress">
+                        <div class="timer-bar" id="timer-bar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Heatmap -->
+            <div class="heatmap-container" id="heatmap-container">
+                <canvas id="heatmap-canvas"></canvas>
+                <div class="heatmap-legend" id="heatmap-legend">
+                    <span class="legend-label">0%</span>
+                    <div class="legend-gradient"></div>
+                    <span class="legend-label">100%</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

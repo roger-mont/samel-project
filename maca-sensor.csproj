@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <AssemblyName>WangYingTestTool</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>True</UseWPF>
+    <TargetFramework>net452</TargetFramework>
+    <Prefer32Bit>True</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>14.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <RootNamespace />
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="effects\heatcolorizer.ps" />
+    <EmbeddedResource Include="effects\heatcolorizer.ps" LogicalName="effects/heatcolorizer.ps" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="WindowsBase" />
+    <Reference Include="AWSSDK.S3">
+      <HintPath>..\..\..\Downloads\WangYingTestTool_AP_V0.0.1.1_230130B\WangYingTestTool_AP_V0.0.1.1_230130B\AWSSDK.S3.dll</HintPath>
+    </Reference>
+    <Reference Include="PresentationCore" />
+    <Reference Include="UsbHid">
+      <HintPath>..\..\..\Downloads\WangYingTestTool_AP_V0.0.1.1_230130B\WangYingTestTool_AP_V0.0.1.1_230130B\UsbHid.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Data" />
+    <Reference Include="AWSSDK.Core">
+      <HintPath>..\..\..\Downloads\WangYingTestTool_AP_V0.0.1.1_230130B\WangYingTestTool_AP_V0.0.1.1_230130B\AWSSDK.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Configuration" />
+  </ItemGroup>
+</Project>
