@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 import bridge
-from config import TARE_SAMPLE_COUNT, WS_PUSH_INTERVAL_SECONDS
+from config.settings import TARE_SAMPLE_COUNT, WS_PUSH_INTERVAL_SECONDS
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ import logging
 
 import numpy as np
 
-from config import CalibrationParams, GRAVITY
+from config.settings import CalibrationParams, GRAVITY
 
 logger = logging.getLogger(__name__)
 

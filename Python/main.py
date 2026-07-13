@@ -9,10 +9,10 @@ import threading
 
 import eel
 
-import api_server
-from config import CalibrationParams, API_PORT
-from serial_reader import SerialFrameReader, FakeSerialReader
-from posture_monitor import PostureMonitor
+import api.server as api_server
+from config.settings import CalibrationParams, API_PORT
+from services.serial_reader import SerialFrameReader, FakeSerialReader
+from providers.posture_monitor import PostureMonitor
 from bridge import start_reading_loop, set_calibration_ref, set_monitor_ref
 
 logging.basicConfig(

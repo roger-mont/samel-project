@@ -3,7 +3,7 @@
 > **Projeto:** Matriz de Sensores FSR (Force Sensing Resistors)  
 > **Plataforma de Hardware:** ESP32-C3 Super Mini + Multiplexador CD74HC4067  
 > **Plataforma de Software:** Python 3 · NumPy · Eel (Webview)  
-> **Última revisão:** 2026-06-01
+> **Última revisão:** 2026-07-13
 
 ---
 
@@ -69,7 +69,7 @@ O microcontrolador envia **um frame completo da matriz** por ciclo de varredura.
 
 O pipeline transforma os valores inteiros brutos do ADC em massa real (Kg) através de uma cadeia determinística de cinco transformações algébricas e uma etapa de filtragem. Todas as operações são executadas de forma **vetorizada** sobre a matriz inteira usando NumPy, eliminando loops explícitos.
 
-> **Arquivo-fonte:** `Python/math_pipeline.py`
+> **Arquivo-fonte:** `Python/services/math_pipeline.py`
 
 ```
 ADC (int) → V_out (V) → R_FSR (Ω) → C (S) → F (N) → deadzone → Massa (Kg)
@@ -319,11 +319,15 @@ Tabela consolidada de todos os parâmetros configuráveis do pipeline, com valor
 
 Mapeamento entre cada etapa do pipeline e o arquivo/função correspondente no repositório:
 
-| Etapa do Pipeline         | Arquivo              | Função                 |
-| :------------------------ | :------------------- | :--------------------- |
-| Leitura Serial / Parsing  | `serial_reader.py`   | `SerialFrameReader.read_frame()` |
-| ADC → Tensão → Força      | `math_pipeline.py`   | `compute_force_matrix()`         |
-| Somatório → Massa (Kg)    | `math_pipeline.py`   | `compute_total_mass()`           |
-| Filtro EMA                | `math_pipeline.py`   | `apply_ema()`                    |
-| Orquestração do loop      | `bridge.py`          | `_reading_loop()`                |
-| Parâmetros de calibração  | `config.py`          | `CalibrationParams`              |
+| Etapa do Pipeline         | Arquivo                          | Função                           |
+| :------------------------ | :------------------------------- | :------------------------------- |
+| Leitura Serial / Parsing  | `services/serial_reader.py`      | `SerialFrameReader.read_frame()` |
+| ADC → Tensão → Força      | `services/math_pipeline.py`      | `compute_force_matrix()`         |
+| Somatório → Massa (Kg)    | `services/math_pipeline.py`      | `compute_total_mass()`           |
+| Filtro EMA                | `services/math_pipeline.py`      | `apply_ema()`                    |
+| Orquestração do loop      | `bridge.py`                      | `_reading_loop()`                |
+| Parâmetros de calibração  | `config/settings.py`             | `CalibrationParams`              |
+| Monitor de postura        | `providers/posture_monitor.py`   | `PostureMonitor`                 |
+| Persistência de tara      | `services/tare_store.py`         | `load_tare()` / `save_tare()`    |
+| API REST + WebSocket      | `api/server.py`                  | FastAPI app                      |
+| Entrypoint                | `main.py`                        | `main()`                         |

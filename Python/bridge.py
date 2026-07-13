@@ -8,11 +8,11 @@ import time
 import eel
 import numpy as np
 
-from config import CalibrationParams, GRID_ROWS, GRID_COLS, TARE_SAMPLE_COUNT
-from serial_reader import BaseFrameReader
-from math_pipeline import compute_force_matrix, compute_total_mass, apply_ema
-from posture_monitor import PostureMonitor
-from tare_store import load_tare, save_tare
+from config.settings import CalibrationParams, GRID_ROWS, GRID_COLS, TARE_SAMPLE_COUNT
+from services.serial_reader import BaseFrameReader
+from services.math_pipeline import compute_force_matrix, compute_total_mass, apply_ema
+from providers.posture_monitor import PostureMonitor
+from services.tare_store import load_tare, save_tare
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ def set_monitor_ref(monitor: PostureMonitor) -> None:
     _monitor_ref = monitor
 
 
-# --- Funções públicas para api_server.py ---
+# --- Funções públicas para api/server.py ---
 
 
 def get_current_snapshot() -> dict:

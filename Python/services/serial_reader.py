@@ -12,7 +12,7 @@ try:
 except ImportError:
     serial = None  # type: ignore[assignment]
 
-from config import GRID_ROWS, GRID_COLS
+from config.settings import GRID_ROWS, GRID_COLS
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 
-from config import TARE_FILE
+from config.settings import TARE_FILE
 
 logger = logging.getLogger(__name__)
 
