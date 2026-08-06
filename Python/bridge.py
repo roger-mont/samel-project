@@ -8,7 +8,7 @@ import time
 import eel
 import numpy as np
 
-from config.settings import CalibrationParams, GRID_ROWS, GRID_COLS, TARE_SAMPLE_COUNT
+from config.settings import CalibrationParams, HID_ROWS, HID_COLS, TARE_SAMPLE_COUNT
 from services.serial_reader import BaseFrameReader
 from services.math_pipeline import compute_force_matrix, compute_total_mass, apply_ema
 from providers.posture_monitor import PostureMonitor
@@ -61,30 +61,8 @@ def _reading_loop(
             connected = reader.is_connected()
             adc_matrix = reader.read_frame()
 
-            adc_sum = float(np.sum(adc_matrix))
-            if adc_sum > 0:
-                logger.info(
-                    "ADC matrix (sum=%.0f, max=%.0f):\n%s",
-                    adc_sum,
-                    float(np.max(adc_matrix)),
-                    adc_matrix,
-                )
-
             force_matrix = compute_force_matrix(adc_matrix, params)
             raw_mass = compute_total_mass(force_matrix)
-
-            if adc_sum > 0:
-                logger.info(
-                    "FORCE matrix (sum=%.6f, max=%.6f):\n%s",
-                    float(np.sum(force_matrix)),
-                    float(np.max(force_matrix)),
-                    force_matrix,
-                )
-                logger.info(
-                    "MASSA bruta=%.4f kg | EMA anterior=%.4f kg",
-                    raw_mass,
-                    previous_weight,
-                )
 
             snap = params.snapshot()
             smoothed_mass = apply_ema(raw_mass, previous_weight, snap["ema_alpha"])
@@ -138,8 +116,8 @@ def get_sensor_data() -> dict:
             "weight_kg": round(_current_weight_kg, 2),
             "static_seconds": round(_static_seconds, 1),
             "is_alert": _is_alert,
-            "rows": GRID_ROWS,
-            "cols": GRID_COLS,
+            "rows": HID_ROWS,
+            "cols": HID_COLS,
             "status": _connection_status,
         }
 
@@ -203,6 +181,29 @@ def update_calibration_param(key: str, value: float) -> dict:
         return {"ok": False, "error": str(err)}
 
 
+@eel.expose
+def tare_start() -> None:
+    """Inicia coleta de TARE_SAMPLE_COUNT amostras para calcular o offset."""
+    start_tare_sampling()
+
+
+@eel.expose
+def tare_clear() -> None:
+    """Remove a tara via frontend."""
+    clear_tare()
+
+
+@eel.expose
+def get_tare_status() -> dict:
+    """Estado atual da tara — exposto ao frontend."""
+    with _state_lock:
+        return {
+            "offset_kg": round(_tare_offset_kg, 3),
+            "active": _tare_offset_kg > 0.0,
+            "pending": _tare_pending,
+        }
+
+
 def start_tare_sampling() -> None:
     """Inicia coleta de TARE_SAMPLE_COUNT amostras para calcular o offset."""
     global _tare_pending, _tare_samples
@@ -213,7 +214,7 @@ def start_tare_sampling() -> None:
 
 
 def clear_tare() -> None:
-    """Remove a tara — peso exibido volta ao bruto. Persiste offset=0."""
+    """Remove a tara — pressão exibida volta ao bruto. Persiste offset=0."""
     global _tare_offset_kg, _tare_pending, _tare_samples
     with _state_lock:
         _tare_offset_kg = 0.0
@@ -221,16 +222,6 @@ def clear_tare() -> None:
         _tare_samples = []
     save_tare(0.0)
     logger.info("tara removida")
-
-
-def get_tare_status() -> dict:
-    """Estado atual da tara."""
-    with _state_lock:
-        return {
-            "offset_kg": round(_tare_offset_kg, 3),
-            "active": _tare_offset_kg > 0.0,
-            "pending": _tare_pending,
-        }
 
 
 def reset_posture_monitor() -> None:

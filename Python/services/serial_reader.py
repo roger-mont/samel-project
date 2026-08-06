@@ -12,7 +12,12 @@ try:
 except ImportError:
     serial = None  # type: ignore[assignment]
 
-from config.settings import GRID_ROWS, GRID_COLS
+try:
+    import hid
+except ImportError:
+    hid = None  # type: ignore[assignment]
+
+from config.settings import GRID_ROWS, GRID_COLS, HID_VID, HID_PID, HID_ROWS, HID_COLS, HID_PACKET_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -186,3 +191,129 @@ class FakeSerialReader(BaseFrameReader):
 
     def close(self) -> None:
         self._connected = False
+
+
+class HidFrameReader(BaseFrameReader):
+    """Leitura via USB HID — protocolo WangYing (VID=6860, PID=6733).
+
+    Estrutura do pacote de 64 bytes:
+      [0]      block_id — identifica o quadrante do colchão (1-8).
+                          0 = pacote vazio, aborta leitura.
+      [1..63]  trincas (x_local, y_local, pressão):
+               x_local  : 1-16 (coluna dentro do quadrante)
+               y_local  : 1-16 (linha dentro do quadrante)
+               pressão  : 0-255 (intensidade FSR)
+               Trinca com x=0 ou y=0 marca fim dos dados úteis.
+
+    Algoritmo de mapeamento (replicado do C# ButtonShowDeal):
+      Blocos 1-4  → x = 16 * ((9 - block_id) // 5) + (16 - x_local)
+                    y = 16 * (block_id - 1)         + (16 - y_local)
+      Blocos 5-8  → x = 16 * ((9 - block_id) // 5) + (x_local - 1)
+                    y = 16 * (8 - block_id)         + (y_local - 1)
+
+    Anti-flickering — por que o C# não flicka:
+      O software original mantém MapV[64,64] como matriz PERSISTENTE e ACUMULADORA.
+      Cada pacote HID atualiza APENAS as células do seu bloco específico — nunca
+      zera a matriz inteira. Um timer de 25ms (disTimerA) amostra a matriz completa
+      e renderiza. Aqui replicamos isso com _persistent_map + drain completo do
+      buffer HID a cada ciclo de 25ms.
+
+    Matriz de saída: HID_ROWS × HID_COLS (32 × 64).
+    """
+
+    _RENDER_INTERVAL_S: float = 0.025  # 25ms = 40Hz (igual ao disTimerA do C#)
+
+    def __init__(self, vid: int = HID_VID, pid: int = HID_PID) -> None:
+        if hid is None:
+            raise ImportError("hidapi nao instalado: pip install hidapi")
+        self._vid = vid
+        self._pid = pid
+        self._device: hid.device | None = None
+        # Matriz global persistente — nunca zerada entre pacotes (espelha MapV do C#)
+        self._persistent_map = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
+        self._connect()
+
+    def _connect(self) -> None:
+        try:
+            device = hid.device()
+            device.open(self._vid, self._pid)
+            device.set_nonblocking(True)
+            self._device = device
+            logger.info("HID conectado: VID=0x%04X PID=0x%04X", self._vid, self._pid)
+        except OSError as err:
+            logger.error("falha ao conectar HID VID=0x%04X PID=0x%04X: %s", self._vid, self._pid, err)
+            self._device = None
+
+    def is_connected(self) -> bool:
+        return self._device is not None
+
+    def read_frame(self) -> np.ndarray:
+        """Drena todos os pacotes HID disponíveis, acumula em _persistent_map e
+        throttla em 40Hz — espelha o par HidMsgDeal + disTimerA do C#."""
+        frame_start = time.monotonic()
+
+        if not self.is_connected():
+            self._connect()
+
+        if self.is_connected():
+            self._drain_hid_buffer()
+
+        # Throttle: aguarda o restante dos 25ms para manter 40Hz estável
+        elapsed = time.monotonic() - frame_start
+        remaining = self._RENDER_INTERVAL_S - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+
+        return self._persistent_map.copy()
+
+    def _drain_hid_buffer(self) -> None:
+        """Lê e acumula TODOS os pacotes disponíveis no buffer HID agora."""
+        try:
+            while True:
+                raw = self._device.read(HID_PACKET_SIZE)  # type: ignore[union-attr]
+                if not raw:
+                    break
+                self._parse_hid_packet(bytes(raw), self._persistent_map)
+        except OSError as err:
+            logger.warning("erro de leitura HID: %s", err)
+            self._device = None
+
+    def _parse_hid_packet(self, data: bytes, matrix: np.ndarray) -> None:
+        """Replica exata do algoritmo ButtonShowDeal do C# original.
+
+        Cada chamada atualiza APENAS as células do block_id recebido.
+        Células de outros blocos não são tocadas — acumulação seletiva.
+        """
+        block_id = data[0]
+
+        if block_id == 0:
+            return
+
+        for i in range(1, len(data) - 1, 3):
+            if i + 2 >= len(data):
+                break
+
+            x_local = data[i]
+            y_local = data[i + 1]
+            pressure = data[i + 2]
+
+            if x_local == 0 or y_local == 0:
+                break
+
+            if block_id < 5:
+                x = 16 * ((9 - block_id) // 5) + (16 - x_local)
+                y = 16 * (block_id - 1) + (16 - y_local)
+            elif block_id < 9:
+                x = 16 * ((9 - block_id) // 5) + (x_local - 1)
+                y = 16 * (8 - block_id) + (y_local - 1)
+            else:
+                continue
+
+            if 0 <= x < HID_ROWS and 0 <= y < HID_COLS:
+                matrix[x, y] = float(pressure)
+
+    def close(self) -> None:
+        if self._device is not None:
+            self._device.close()
+            self._device = None
+            logger.info("HID desconectado")

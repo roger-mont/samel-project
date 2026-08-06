@@ -11,7 +11,7 @@ import eel
 
 import api.server as api_server
 from config.settings import CalibrationParams, API_PORT
-from services.serial_reader import SerialFrameReader, FakeSerialReader
+from services.serial_reader import SerialFrameReader, FakeSerialReader, HidFrameReader
 from providers.posture_monitor import PostureMonitor
 from bridge import start_reading_loop, set_calibration_ref, set_monitor_ref
 
@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
         "--simulate",
         action="store_true",
         help="usa dados sinteticos ao inves do hardware real",
+    )
+    parser.add_argument(
+        "--hid",
+        action="store_true",
+        help="usa protocolo USB HID (colchao WangYing) ao inves da serial CSV",
     )
     return parser.parse_args()
 
@@ -62,6 +67,9 @@ def main() -> None:
     if args.simulate:
         logger.info("modo simulacao ativo — dados sinteticos")
         reader = FakeSerialReader(change_interval=30.0)
+    elif args.hid:
+        logger.info("modo USB HID ativo — protocolo WangYing")
+        reader = HidFrameReader()
     else:
         logger.info("conectando serial: %s @ %d", args.port, args.baud)
         reader = SerialFrameReader(port=args.port, baudrate=args.baud)

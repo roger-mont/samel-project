@@ -52,28 +52,8 @@
                 </h3>
                 <div class="calibration-grid">
                     <div class="calib-field">
-                        <label for="calib-vcc">VCC (V)</label>
-                        <input type="number" id="calib-vcc" data-key="vcc" value="5.0" step="0.1" min="0">
-                    </div>
-                    <div class="calib-field">
-                        <label for="calib-adc">Resolução ADC</label>
-                        <input type="number" id="calib-adc" data-key="adc_resolution" value="255" step="1" min="1">
-                    </div>
-                    <div class="calib-field">
-                        <label for="calib-pulldown">R Pull-Down (Ω)</label>
-                        <input type="number" id="calib-pulldown" data-key="pulldown_resistor" value="10000" step="100" min="1">
-                    </div>
-                    <div class="calib-field">
-                        <label for="calib-factor-m">Fator M</label>
-                        <input type="number" id="calib-factor-m" data-key="factor_m" value="1.0" step="0.01">
-                    </div>
-                    <div class="calib-field">
-                        <label for="calib-offset-b">Offset B</label>
-                        <input type="number" id="calib-offset-b" data-key="offset_b" value="0.0" step="0.01">
-                    </div>
-                    <div class="calib-field">
-                        <label for="calib-deadzone">Deadzone (N)</label>
-                        <input type="number" id="calib-deadzone" data-key="deadzone_threshold" value="0.05" step="0.01" min="0">
+                        <label for="calib-deadzone">Deadzone (0-255)</label>
+                        <input type="number" id="calib-deadzone" data-key="deadzone_threshold" value="2" step="1" min="0" max="50">
                     </div>
                     <div class="calib-field">
                         <label for="calib-ema">EMA Alpha</label>
@@ -87,6 +67,19 @@
                         <label for="calib-timeout">Timeout Postura (s)</label>
                         <input type="number" id="calib-timeout" data-key="posture_timeout_seconds" value="60" step="5" min="5">
                     </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3 class="section-title">
+                    <span class="section-icon">⚖️</span>
+                    Tara
+                </h3>
+                <div class="tare-section">
+                    <p class="tare-description">Zera a pressão base atual (colchão sem carga).</p>
+                    <button id="btn-tare" class="btn-tare" onclick="triggerTare()">Aplicar Tara</button>
+                    <button id="btn-tare-clear" class="btn-tare-clear" onclick="clearTare()">Remover Tara</button>
+                    <div class="tare-status" id="tare-status">Inativa</div>
                 </div>
             </div>
 

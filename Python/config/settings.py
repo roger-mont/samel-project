@@ -5,9 +5,16 @@ import threading
 from dataclasses import dataclass, field, fields
 
 
-GRID_ROWS: int = 6
-GRID_COLS: int = 3
-GRAVITY: float = 9.81
+GRID_ROWS: int = 32   # espelha HID_ROWS — metade do grid estava vazia
+GRID_COLS: int = 64   # espelha HID_COLS
+
+# Constantes do protocolo USB HID (WangYing / colchão inteligente)
+# Dimensões reais usadas pelo software original: 32 linhas × 64 colunas
+HID_VID: int = 6860   # Vendor ID  (0x1ACC)
+HID_PID: int = 6733   # Product ID (0x1A4D)
+HID_ROWS: int = 32
+HID_COLS: int = 64
+HID_PACKET_SIZE: int = 64  # bytes por report HID
 
 API_PORT: int = 8000
 API_HOST: str = "0.0.0.0"
@@ -18,15 +25,14 @@ WS_PUSH_INTERVAL_SECONDS: int = 10
 
 @dataclass
 class CalibrationParams:
-    """Parâmetros de calibração — mutáveis via UI em tempo real."""
+    """Parâmetros de comportamento — mutáveis via UI em tempo real.
 
-    vcc: float = 3.3
-    adc_resolution: int = 4095
-    pulldown_resistor: float = 470_000.00
-    factor_m: float = 59778938.84
-    offset_b: float = 5.54
-    deadzone_threshold: float = 0.5
-    ema_alpha: float = 0.3
+    Os valores brutos 0-255 do HID são usados diretamente como intensidade
+    de pressão. Não há conversão de tensão ou resistência.
+    """
+
+    deadzone_threshold: float = 2.0    # ignora sensores com valor <= este limiar
+    ema_alpha: float = 0.3              # suavização exponencial do peso total
     posture_tolerance: float = 0.15
     posture_timeout_seconds: int = 60
     _lock: threading.Lock = field(

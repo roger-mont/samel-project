@@ -20,6 +20,9 @@
         alertOverlay: document.getElementById("alert-overlay"),
         alertTime: document.getElementById("alert-time"),
         heatmapContainer: document.getElementById("heatmap-container"),
+        tareStatus: document.getElementById("tare-status"),
+        btnTare: document.getElementById("btn-tare"),
+        btnTareClear: document.getElementById("btn-tare-clear"),
     };
 
     const ctx = DOM.canvas.getContext("2d");
@@ -229,6 +232,41 @@
         hideAlert();
     };
 
+    /* --- Tare --- */
+    window.triggerTare = function () {
+        DOM.btnTare.disabled = true;
+        DOM.btnTare.textContent = "Coletando...";
+        DOM.tareStatus.textContent = "Coletando amostras...";
+        DOM.tareStatus.className = "tare-status tare-pending";
+
+        eel.tare_start()(function () {
+            /* o status é atualizado no próximo poll */
+        });
+    };
+
+    window.clearTare = function () {
+        eel.tare_clear()(function () {
+            DOM.tareStatus.textContent = "Inativa";
+            DOM.tareStatus.className = "tare-status";
+        });
+    };
+
+    function updateTareStatus(tare) {
+        if (!tare) return;
+        DOM.btnTare.disabled = tare.pending;
+        DOM.btnTare.textContent = tare.pending ? "Coletando..." : "Aplicar Tara";
+        if (tare.pending) {
+            DOM.tareStatus.textContent = "Coletando amostras...";
+            DOM.tareStatus.className = "tare-status tare-pending";
+        } else if (tare.active) {
+            DOM.tareStatus.textContent = `Ativa — offset ${tare.offset_kg.toFixed(1)}`;
+            DOM.tareStatus.className = "tare-status tare-active";
+        } else {
+            DOM.tareStatus.textContent = "Inativa";
+            DOM.tareStatus.className = "tare-status";
+        }
+    }
+
     /* --- Calibration Panel --- */
     function initCalibrationPanel() {
         const inputs = document.querySelectorAll(".calib-field input");
@@ -277,6 +315,10 @@
             const timeout = calibSnap ? calibSnap.posture_timeout_seconds : 60;
             updateTimer(data.static_seconds, timeout, data.is_alert);
 
+            /* Tare status */
+            const tare = await eel.get_tare_status()();
+            updateTareStatus(tare);
+
             /* Alert logic */
             if (data.is_alert && !lastAlertState) {
                 alertDismissed = false;
@@ -293,6 +335,7 @@
             console.error("poll error:", err);
         }
     }
+
 
     /* --- Init --- */
     function init() {

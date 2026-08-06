@@ -570,3 +570,77 @@ html, body {
 .alert-btn:active {
     transform: translateY(0);
 }
+
+/* --- Tare Section --- */
+.tare-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tare-description {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.btn-tare {
+    width: 100%;
+    padding: 10px 16px;
+    background: var(--gradient-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.btn-tare:hover:not(:disabled) {
+    opacity: 0.88;
+    transform: translateY(-1px);
+}
+
+.btn-tare:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn-tare-clear {
+    width: 100%;
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.btn-tare-clear:hover {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.tare-status {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-muted);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--glass-bg);
+    text-align: center;
+}
+
+.tare-status.tare-pending {
+    color: var(--accent-amber);
+    background: rgba(255, 170, 0, 0.08);
+}
+
+.tare-status.tare-active {
+    color: var(--accent-green);
+    background: rgba(50, 200, 120, 0.08);
+}
