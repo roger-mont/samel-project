@@ -231,6 +231,7 @@ class HidFrameReader(BaseFrameReader):
         self._device: hid.device | None = None
         # Matriz global persistente — nunca zerada entre pacotes (espelha MapV do C#)
         self._persistent_map = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
+        self._max_seen: int = 0  # maior valor de pressão já recebido
         self._connect()
 
     def _connect(self) -> None:
@@ -296,6 +297,9 @@ class HidFrameReader(BaseFrameReader):
             x_local = data[i]
             y_local = data[i + 1]
             pressure = data[i + 2]
+
+            if pressure > self._max_seen:
+                self._max_seen = pressure
 
             if x_local == 0 or y_local == 0:
                 break

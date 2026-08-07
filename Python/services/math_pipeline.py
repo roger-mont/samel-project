@@ -1,7 +1,10 @@
-"""Pipeline de pressão — pass-through direto dos valores HID (0-255).
+"""Pipeline de pressão — aplica calibração e retorna kg por bloco.
 
-Os bytes recebidos via USB HID já representam intensidade de pressão bruta.
-Não há conversão de tensão, resistência ou força.
+Fluxo:
+  matriz HID bruta (0-255)
+    → deadzone (compute_force_matrix)
+    → conversão por bloco via curva polinomial (compute_total_mass)
+    → EMA temporal (apply_ema)
 """
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ import logging
 import numpy as np
 
 from config.settings import CalibrationParams
+from services.calibration_store import CalibData
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +43,24 @@ def compute_force_matrix(
     return result
 
 
-def compute_total_mass(pressure_matrix: np.ndarray) -> float:
-    """Retorna a soma total de pressão como escalar (unidade: pressão bruta).
+def compute_total_mass(
+    pressure_matrix: np.ndarray,
+    calib: CalibData | None = None,
+) -> float:
+    """Converte a matriz de pressão em kg usando calibração por bloco.
 
-    O campo 'weight_kg' no frontend passará a representar pressão total acumulada,
-    não massa física.
+    Se `calib` for None ou inválido, retorna a soma bruta como fallback.
     """
+    if calib is not None and calib.is_valid:
+        return calib.matrix_to_kg(pressure_matrix)
+
+    # Fallback — sem calibração carregada
+    logger.debug("sem calibração válida — usando soma bruta")
     return float(np.sum(pressure_matrix))
 
 
 def apply_ema(current: float, previous: float, alpha: float) -> float:
-    """Média Móvel Exponencial para suavização da pressão total exibida.
+    """Média Móvel Exponencial para suavização do peso total exibido.
 
     EMA = α × atual + (1 − α) × anterior
     """

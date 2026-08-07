@@ -11,6 +11,7 @@ import numpy as np
 from config.settings import CalibrationParams, HID_ROWS, HID_COLS, TARE_SAMPLE_COUNT
 from services.serial_reader import BaseFrameReader
 from services.math_pipeline import compute_force_matrix, compute_total_mass, apply_ema
+from services.calibration_store import CalibData, load_calibration
 from providers.posture_monitor import PostureMonitor
 from services.tare_store import load_tare, save_tare
 
@@ -27,17 +28,20 @@ _tare_offset_kg: float = load_tare()
 _tare_pending: bool = False
 _tare_samples: list[float] = []
 _monitor_ref: PostureMonitor | None = None
+_reader_ref: BaseFrameReader | None = None
 
 
 def start_reading_loop(
     reader: BaseFrameReader,
     params: CalibrationParams,
     monitor: PostureMonitor,
+    calib_path: str = "calibration.json",
 ) -> None:
     """Inicia thread daemon que lê frames e processa continuamente."""
+    calib = load_calibration(calib_path)
     thread = threading.Thread(
         target=_reading_loop,
-        args=(reader, params, monitor),
+        args=(reader, params, monitor, calib),
         daemon=True,
         name="serial-reader-loop",
     )
@@ -49,6 +53,7 @@ def _reading_loop(
     reader: BaseFrameReader,
     params: CalibrationParams,
     monitor: PostureMonitor,
+    calib: CalibData,
 ) -> None:
     global _current_heatmap, _current_weight_kg
     global _static_seconds, _is_alert, _connection_status
@@ -62,7 +67,7 @@ def _reading_loop(
             adc_matrix = reader.read_frame()
 
             force_matrix = compute_force_matrix(adc_matrix, params)
-            raw_mass = compute_total_mass(force_matrix)
+            raw_mass = compute_total_mass(force_matrix, calib)
 
             snap = params.snapshot()
             smoothed_mass = apply_ema(raw_mass, previous_weight, snap["ema_alpha"])
@@ -134,6 +139,14 @@ def get_calibration() -> dict:
     return get_calibration_snapshot()
 
 
+@eel.expose
+def get_max_pressure() -> int:
+    """Retorna o maior valor de pressão já recebido desde o início da sessão."""
+    if _reader_ref is not None and hasattr(_reader_ref, "_max_seen"):
+        return _reader_ref._max_seen
+    return 0
+
+
 # Referência injetada pelo main.py
 _calibration_ref: CalibrationParams = CalibrationParams()
 
@@ -148,6 +161,12 @@ def set_monitor_ref(monitor: PostureMonitor) -> None:
     """Injeta referência ao PostureMonitor — análogo a set_calibration_ref."""
     global _monitor_ref
     _monitor_ref = monitor
+
+
+def set_reader_ref(reader: BaseFrameReader) -> None:
+    """Injeta referência ao reader ativo para expor métricas ao frontend."""
+    global _reader_ref
+    _reader_ref = reader
 
 
 # --- Funções públicas para api/server.py ---

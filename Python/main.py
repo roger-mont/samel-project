@@ -13,7 +13,7 @@ import api.server as api_server
 from config.settings import CalibrationParams, API_PORT
 from services.serial_reader import SerialFrameReader, FakeSerialReader, HidFrameReader
 from providers.posture_monitor import PostureMonitor
-from bridge import start_reading_loop, set_calibration_ref, set_monitor_ref
+from bridge import start_reading_loop, set_calibration_ref, set_monitor_ref, set_reader_ref
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,6 +74,7 @@ def main() -> None:
         logger.info("conectando serial: %s @ %d", args.port, args.baud)
         reader = SerialFrameReader(port=args.port, baudrate=args.baud)
 
+    set_reader_ref(reader)
     start_reading_loop(reader, params, monitor)
     _start_api_server(API_PORT)
 

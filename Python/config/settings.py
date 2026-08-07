@@ -5,8 +5,8 @@ import threading
 from dataclasses import dataclass, field, fields
 
 
-GRID_ROWS: int = 32   # espelha HID_ROWS — metade do grid estava vazia
-GRID_COLS: int = 64   # espelha HID_COLS
+GRID_ROWS: int = 16   # espelha HID_ROWS — metade do grid estava vazia
+GRID_COLS: int = 16   # espelha HID_COLS
 
 # Constantes do protocolo USB HID (WangYing / colchão inteligente)
 # Dimensões reais usadas pelo software original: 32 linhas × 64 colunas

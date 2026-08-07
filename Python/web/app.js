@@ -23,6 +23,7 @@
         tareStatus: document.getElementById("tare-status"),
         btnTare: document.getElementById("btn-tare"),
         btnTareClear: document.getElementById("btn-tare-clear"),
+        maxPressureValue: document.getElementById("max-pressure-value"),
     };
 
     const ctx = DOM.canvas.getContext("2d");
@@ -318,6 +319,10 @@
             /* Tare status */
             const tare = await eel.get_tare_status()();
             updateTareStatus(tare);
+
+            /* Pico de pressão */
+            const peak = await eel.get_max_pressure()();
+            DOM.maxPressureValue.textContent = peak;
 
             /* Alert logic */
             if (data.is_alert && !lastAlertState) {

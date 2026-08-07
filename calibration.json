@@ -1,0 +1,38 @@
+{
+  "block_id": 1,
+  "tare_block_sum": 0.0,
+  "polynomial_degree": 2,
+  "coefficients": [
+    2.1180635998102963e-07,
+    0.000994940367392296,
+    0.2281365521747772
+  ],
+  "rmse_kg": 0.207,
+  "calibration_points": [
+    {
+      "kg": 0.631,
+      "raw_sum": 471.4795918367347
+    },
+    {
+      "kg": 1.165,
+      "raw_sum": 804.8979591836735
+    },
+    {
+      "kg": 1.796,
+      "raw_sum": 1052.2142857142858
+    },
+    {
+      "kg": 2.348,
+      "raw_sum": 1809.9183673469388
+    },
+    {
+      "kg": 2.979,
+      "raw_sum": 1883.5816326530612
+    },
+    {
+      "kg": 4.158,
+      "raw_sum": 2520.0714285714284
+    }
+  ],
+  "usage": "kg_bloco = np.polyval(coefficients, raw_sum_bloco - tare_block_sum). Para manta inteira: calcular kg_bloco para cada bloco e somar."
+}
