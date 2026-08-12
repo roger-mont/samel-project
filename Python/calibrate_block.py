@@ -2,11 +2,13 @@
 
 Como usar:
     cd "Projeto Walter"
-    .\venv\Scripts\activate   (Windows)
+    .\\venv\\Scripts\\activate   (Windows)
     python Python/calibrate_block.py --block 1
 
-Coloque pesos conhecidos sobre a placa rígida posicionada no bloco escolhido.
-O script guia cada etapa interativamente.
+Todos os setores podem estar conectados simultaneamente.
+O script isola a leitura do bloco alvo por slice da matriz.
+Cada execução atualiza APENAS o bloco calibrado no calibration.json,
+preservando os dados dos demais blocos já salvos.
 """
 from __future__ import annotations
 
@@ -18,7 +20,6 @@ from pathlib import Path
 
 import numpy as np
 
-# Resolve imports do projeto
 sys.path.insert(0, str(Path(__file__).parent))
 from config.settings import HID_VID, HID_PID, HID_PACKET_SIZE, HID_ROWS, HID_COLS
 
@@ -28,11 +29,6 @@ except ImportError:
     print("[ERRO] hidapi nao instalado. Execute: pip install hidapi")
     sys.exit(1)
 
-
-# ---------------------------------------------------------------------------
-# Mapeamento block_id → slice da matriz global 32×64
-# Espelha o mapeamento ButtonShowDeal do C# (mesmo do HidFrameReader)
-# ---------------------------------------------------------------------------
 
 BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
     1: (slice(16, 32), slice(0,  16)),
@@ -45,15 +41,15 @@ BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
     8: (slice(0,  16), slice(0,  16)),
 }
 
-SAMPLE_SECONDS = 5      # segundos de coleta estável por ponto de peso
-RENDER_INTERVAL = 0.025  # 25 ms — mesma cadência do sistema principal
+SAMPLE_SECONDS = 5
+RENDER_INTERVAL = 0.025
 
 
 # ---------------------------------------------------------------------------
-# Parse HID — idêntico ao HidFrameReader._parse_hid_packet
+# HID — parse idêntico ao HidFrameReader
 # ---------------------------------------------------------------------------
 
-def parse_packet(data: bytes, matrix: np.ndarray) -> None:
+def _parse_packet(data: bytes, matrix: np.ndarray) -> None:
     block_id = data[0]
     if block_id == 0 or block_id > 8:
         return
@@ -75,33 +71,100 @@ def parse_packet(data: bytes, matrix: np.ndarray) -> None:
             matrix[x, y] = float(pressure)
 
 
-def read_block_sum_stable(device: hid.device, block_id: int, duration_s: float) -> float:
-    """Drena o buffer HID por `duration_s` segundos e retorna a média da soma do bloco."""
+def _read_block_sum(device: hid.device, block_id: int, duration_s: float) -> float:
+    """Drena o buffer HID por `duration_s` segundos e retorna a média do bloco alvo.
+
+    Outros blocos podem estar ativos — são ignorados via slice.
+    """
     matrix = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
     row_sl, col_sl = BLOCK_REGIONS[block_id]
     samples: list[float] = []
     deadline = time.monotonic() + duration_s
 
     while time.monotonic() < deadline:
-        frame_start = time.monotonic()
+        t0 = time.monotonic()
         try:
             while True:
                 raw = device.read(HID_PACKET_SIZE)
                 if not raw:
                     break
-                parse_packet(bytes(raw), matrix)
+                _parse_packet(bytes(raw), matrix)
         except OSError:
             break
         samples.append(float(matrix[row_sl, col_sl].sum()))
-        remaining = RENDER_INTERVAL - (time.monotonic() - frame_start)
-        if remaining > 0:
-            time.sleep(remaining)
+        rem = RENDER_INTERVAL - (time.monotonic() - t0)
+        if rem > 0:
+            time.sleep(rem)
 
     return float(np.mean(samples)) if samples else 0.0
 
 
 # ---------------------------------------------------------------------------
-# Calibração principal
+# Persistência — formato multi-bloco v2
+# ---------------------------------------------------------------------------
+
+def _load_existing(path: Path) -> dict:
+    """Carrega calibration.json existente (v1 ou v2) como dict interno."""
+    if not path.exists():
+        return {"version": 2, "blocks": {}}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print(f"  [AVISO] {path.name} corrompido — será recriado.")
+        return {"version": 2, "blocks": {}}
+
+    # Migração: formato v1 (single-block) → v2 (multi-block)
+    if "version" not in data and "block_id" in data:
+        bid = str(data["block_id"])
+        migrated: dict = {"version": 2, "blocks": {bid: {
+            "tare_block_sum": data.get("tare_block_sum", 0.0),
+            "polynomial_degree": data.get("polynomial_degree", 2),
+            "coefficients": data.get("coefficients", []),
+            "rmse_kg": data.get("rmse_kg", 0.0),
+            "calibration_points": data.get("calibration_points", []),
+        }}}
+        print(f"  [INFO] calibration.json v1 migrado para v2 (bloco {bid} preservado).")
+        return migrated
+
+    return data
+
+
+def _save_block(path: Path, block_id: int, block_data: dict) -> None:
+    """Atualiza apenas a entrada do bloco `block_id` no JSON."""
+    existing = _load_existing(path)
+    existing["blocks"][str(block_id)] = block_data
+    path.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
+# Ajuste de curva
+# ---------------------------------------------------------------------------
+
+def _fit_curve(
+    weights: np.ndarray,
+    sums_raw: np.ndarray,
+    tare_sum: float,
+) -> tuple[list[float], float, np.ndarray]:
+    """Retorna (coefficients, rmse_kg, net_sums)."""
+    net = sums_raw - tare_sum
+    degree = min(2, len(weights) - 1)
+    coeffs = np.polyfit(net, weights, deg=degree).tolist()
+    predicted = np.polyval(coeffs, net)
+    rmse = float(np.sqrt(np.mean((predicted - weights) ** 2)))
+    return coeffs, rmse, net
+
+
+def _print_table(weights: np.ndarray, net_sums: np.ndarray, coeffs: list[float]) -> None:
+    predicted = np.polyval(coeffs, net_sums)
+    print(f"\n  {'#':<4} {'Real (kg)':>10} {'Net Sum':>10} {'Predito':>10} {'Erro':>8}")
+    print("  " + "-" * 50)
+    for i, (kg_r, ns, pred) in enumerate(zip(weights, net_sums, predicted)):
+        print(f"  {i:<4} {kg_r:>10.3f} {ns:>10.1f} {pred:>10.3f} {kg_r - pred:>+8.3f}")
+
+
+# ---------------------------------------------------------------------------
+# CLI principal
 # ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
@@ -118,20 +181,23 @@ def main() -> None:
     block_id = args.block
     output_path = Path(args.output)
 
+    existing = _load_existing(output_path)
+    blocos_prontos = list(existing.get("blocks", {}).keys())
+
     print(f"\n{'='*60}")
-    print(f"  CALIBRAÇÃO — Bloco {block_id}  (região: {BLOCK_REGIONS[block_id]})")
+    print(f"  CALIBRAÇÃO — Bloco {block_id}")
     print(f"{'='*60}")
+    if blocos_prontos:
+        print(f"  Blocos já calibrados: {', '.join(blocos_prontos)}")
     print("""
 PREPARAÇÃO FÍSICA:
-  1. Posicione a placa RÍGIDA E PLANA exatamente sobre o bloco.
-     (placa de MDF, acrílico ou metal com ≥10mm de espessura)
-  2. A placa deve cobrir toda a área 16×16 do bloco.
-  3. Nenhum peso sobre a placa ainda.
-  4. HID conectado ao USB.
+  - Placa rígida e plana posicionada sobre o bloco alvo.
+  - Os demais blocos podem estar conectados e ativos — o script
+    lê APENAS a região do bloco escolhido.
+  - Nenhum peso sobre a placa ainda.
 """)
     input("  Pressione Enter quando pronto...")
 
-    # Conectar HID
     try:
         device = hid.device()
         device.open(HID_VID, HID_PID)
@@ -144,96 +210,103 @@ PREPARAÇÃO FÍSICA:
     weight_kg_list: list[float] = []
     raw_sum_list: list[float] = []
 
-    print("Digite os pesos disponíveis UM A UM.")
-    print("Sugestão de pontos: 0, 5, 10, 15, 20, 25, 30 kg")
-    print("Deixe em branco e Enter para finalizar.\n")
+    print("Comandos disponíveis no prompt de peso:")
+    print("  <número>  — registra um ponto de calibração")
+    print("  r         — remove o último ponto registrado")
+    print("  l         — lista os pontos atuais")
+    print("  Enter     — finaliza (mínimo 3 pontos)\n")
 
     while True:
-        entrada = input("Próximo peso (kg) — ou Enter para finalizar: ").strip()
+        entrada = input("Peso (kg) / r / l / Enter p/ finalizar: ").strip().lower()
+
+        # --- Finalizar ---
         if entrada == "":
             if len(weight_kg_list) < 3:
-                print("  [AVISO] Adicione ao menos 3 pontos para um ajuste de curva válido.\n")
+                print("  [AVISO] Mínimo 3 pontos necessários.\n")
                 continue
             break
 
+        # --- Listar ---
+        if entrada == "l":
+            if not weight_kg_list:
+                print("  (nenhum ponto registrado ainda)\n")
+            else:
+                print(f"  {'#':<4} {'Peso (kg)':>10} {'Sum bruto':>12}")
+                for i, (kg, s) in enumerate(zip(weight_kg_list, raw_sum_list)):
+                    print(f"  {i:<4} {kg:>10.3f} {s:>12.1f}")
+                print()
+            continue
+
+        # --- Remover último ---
+        if entrada == "r":
+            if not weight_kg_list:
+                print("  Nenhum ponto para remover.\n")
+                continue
+            kg_rem = weight_kg_list.pop()
+            raw_rem = raw_sum_list.pop()
+            print(f"  Ponto removido: {kg_rem:.3f} kg (sum={raw_rem:.1f})\n")
+            continue
+
+        # --- Novo ponto ---
         try:
             kg = float(entrada.replace(",", "."))
         except ValueError:
-            print("  Valor inválido. Digite um número (ex: 10 ou 10.5)\n")
+            print("  Valor inválido. Digite um número, 'r', 'l' ou Enter.\n")
             continue
 
         if kg == 0:
-            input("\n  [AÇÃO] Retire todos os pesos da placa. Pressione Enter para medir TARA...")
+            input("\n  [AÇÃO] Retire todos os pesos. Pressione Enter para medir TARA...")
         else:
-            input(f"\n  [AÇÃO] Coloque {kg:.1f} kg sobre a placa. Aguarde estabilizar (~5s) e pressione Enter...")
+            input(f"\n  [AÇÃO] Coloque {kg:.3f} kg. Aguarde estabilizar e pressione Enter...")
 
-        print(f"  Coletando amostras por {SAMPLE_SECONDS}s...", end="", flush=True)
-        media = read_block_sum_stable(device, block_id, SAMPLE_SECONDS)
+        print(f"  Coletando {SAMPLE_SECONDS}s...", end="", flush=True)
+        media = _read_block_sum(device, block_id, SAMPLE_SECONDS)
         print(f"  ✓  sum_bruto = {media:.1f}")
 
         weight_kg_list.append(kg)
         raw_sum_list.append(media)
-        print(f"  Ponto salvo: {kg:.1f} kg → sum={media:.1f}\n")
+        print(f"  Ponto [{len(weight_kg_list) - 1}] salvo: {kg:.3f} kg → sum={media:.1f}")
+        print("  (use 'r' para desfazer este ponto se necessário)\n")
 
     device.close()
 
-    # ---------------------------------------------------------------------------
-    # Ajuste de curva polinomial
-    # ---------------------------------------------------------------------------
+    # Ajuste de curva
     weights = np.array(weight_kg_list)
     sums_raw = np.array(raw_sum_list)
 
-    # Tara: soma bruta do bloco com 0 kg
     zero_idx = np.where(weights == 0.0)[0]
     tare_sum = float(sums_raw[zero_idx[0]]) if len(zero_idx) > 0 else 0.0
-    net_sums = sums_raw - tare_sum  # subtrai tara → ponto 0 vira origem
 
-    # Polinômio grau 2 (ou 1 se poucos pontos): net_sum → kg
-    degree = min(2, len(weights) - 1)
-    coeffs = np.polyfit(net_sums, weights, deg=degree).tolist()
-    poly = np.poly1d(coeffs)
+    coeffs, rmse, net_sums = _fit_curve(weights, sums_raw, tare_sum)
 
-    # RMSE de validação
-    predicted = poly(net_sums)
-    rmse = float(np.sqrt(np.mean((predicted - weights) ** 2)))
-
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  RESULTADO")
-    print("="*60)
-    print(f"  Tara (sum com 0 kg):      {tare_sum:.1f}")
-    print(f"  Grau do polinômio:        {degree}")
-    print(f"  Coeficientes:             {[round(c, 8) for c in coeffs]}")
-    print(f"  RMSE:                     {rmse:.3f} kg")
+    print("=" * 60)
+    print(f"  Tara (sum 0 kg):   {tare_sum:.1f}")
+    print(f"  Coeficientes:      {[round(c, 8) for c in coeffs]}")
+    print(f"  RMSE:              {rmse:.4f} kg")
     if rmse > 1.5:
-        print("  [AVISO] RMSE > 1.5 kg — adicione mais pontos intermediários.")
+        print("  [AVISO] RMSE > 1.5 kg — considere mais pontos intermediários.")
 
-    print("\n  Verificação ponto a ponto:")
-    print(f"  {'Real (kg)':>10} | {'Net Sum':>10} | {'Predito':>10} | {'Erro':>8}")
-    print("  " + "-"*46)
-    for kg_r, ns, pred in zip(weights, net_sums, predicted):
-        print(f"  {kg_r:>10.1f} | {ns:>10.1f} | {pred:>10.2f} | {kg_r - pred:>+8.3f}")
+    _print_table(weights, net_sums, coeffs)
 
-    # ---------------------------------------------------------------------------
-    # Salvar JSON
-    # ---------------------------------------------------------------------------
-    output = {
-        "block_id": block_id,
+    block_data = {
         "tare_block_sum": tare_sum,
-        "polynomial_degree": degree,
+        "polynomial_degree": min(2, len(weights) - 1),
         "coefficients": coeffs,
         "rmse_kg": round(rmse, 4),
         "calibration_points": [
             {"kg": float(k), "raw_sum": float(s)}
             for k, s in zip(weights, sums_raw)
         ],
-        "usage": (
-            "kg_bloco = np.polyval(coefficients, raw_sum_bloco - tare_block_sum). "
-            "Para manta inteira: calcular kg_bloco para cada bloco e somar."
-        ),
     }
-    output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False))
-    print(f"\n[OK] Salvo em: {output_path.resolve()}")
-    print("="*60 + "\n")
+
+    _save_block(output_path, block_id, block_data)
+
+    blocos_apos = list(_load_existing(output_path).get("blocks", {}).keys())
+    print(f"\n[OK] Bloco {block_id} salvo em: {output_path.resolve()}")
+    print(f"     Blocos no arquivo: {', '.join(blocos_apos)}")
+    print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":
