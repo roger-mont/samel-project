@@ -71,9 +71,10 @@ def _parse_packet(data: bytes, matrix: np.ndarray) -> None:
             matrix[x, y] = float(pressure)
 
 
-def _read_block_sum(device: hid.device, block_id: int, duration_s: float) -> float:
-    """Drena o buffer HID por `duration_s` segundos e retorna a média do bloco alvo.
+def _read_block_sum(device: hid.device, block_id: int, duration_s: float) -> tuple[float, float]:
+    """Drena o buffer HID por `duration_s` segundos.
 
+    Retorna (média, desvio_padrão) da soma do bloco alvo.
     Outros blocos podem estar ativos — são ignorados via slice.
     """
     matrix = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
@@ -96,7 +97,9 @@ def _read_block_sum(device: hid.device, block_id: int, duration_s: float) -> flo
         if rem > 0:
             time.sleep(rem)
 
-    return float(np.mean(samples)) if samples else 0.0
+    if not samples:
+        return 0.0, 0.0
+    return float(np.mean(samples)), float(np.std(samples))
 
 
 # ---------------------------------------------------------------------------
@@ -257,11 +260,33 @@ PREPARAÇÃO FÍSICA:
         if kg == 0:
             input("\n  [AÇÃO] Retire todos os pesos. Pressione Enter para medir TARA...")
         else:
-            input(f"\n  [AÇÃO] Coloque {kg:.3f} kg. Aguarde estabilizar e pressione Enter...")
+            input(f"\n  [AÇÃO] Coloque {kg:.3f} kg. Aguarde COMPLETAMENTE parado e pressione Enter...")
 
         print(f"  Coletando {SAMPLE_SECONDS}s...", end="", flush=True)
-        media = _read_block_sum(device, block_id, SAMPLE_SECONDS)
-        print(f"  ✓  sum_bruto = {media:.1f}")
+        media, std = _read_block_sum(device, block_id, SAMPLE_SECONDS)
+        cv = (std / media * 100) if media > 0 else 0.0
+        estavel = cv < 8.0
+        simbolo = "✓" if estavel else "⚠"
+        print(f"  {simbolo}  sum={media:.1f}  std={std:.1f}  variação={cv:.1f}%")
+
+        # Aviso de instabilidade — placa oscilando durante medição
+        if not estavel:
+            print("  [AVISO] Medição instável (variação > 8%) — placa ou peso pode ter oscilado.")
+            resp = input("  Refazer esta medição? (s/N): ").strip().lower()
+            if resp == "s":
+                print()
+                continue
+
+        # Verificação de monotonia — mais peso deve gerar sum maior
+        if weight_kg_list and kg > weight_kg_list[-1]:
+            ultimo_sum = raw_sum_list[-1]
+            if media < ultimo_sum:
+                print(f"  [ERRO DE MONOTONIA] sum caiu ({ultimo_sum:.0f}→{media:.0f}) com peso maior "
+                      f"({weight_kg_list[-1]:.3f}→{kg:.3f} kg). Medição provavelmente incorreta.")
+                resp = input("  Descartar e refazer? (s/N): ").strip().lower()
+                if resp == "s":
+                    print()
+                    continue
 
         weight_kg_list.append(kg)
         raw_sum_list.append(media)
