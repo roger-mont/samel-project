@@ -12,6 +12,8 @@ pip-delete-this-directory.txt
 
 # Runtime artifacts
 Python/tare.json
+tare.json
+sessions/
 
 # OS-specific
 Thumbs.db

@@ -5,6 +5,8 @@ import threading
 from dataclasses import dataclass, field, fields
 
 
+SOFTWARE_VERSION: str = "1.0.0"
+
 GRID_ROWS: int = 16   # espelha HID_ROWS — metade do grid estava vazia
 GRID_COLS: int = 16   # espelha HID_COLS
 

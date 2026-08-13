@@ -22,6 +22,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config.settings import HID_VID, HID_PID, HID_PACKET_SIZE, HID_ROWS, HID_COLS
+from services.session_logger import CalibrationSessionLogger
 
 try:
     import hid
@@ -174,24 +175,36 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Calibração de bloco FSR 16x16")
     p.add_argument("--block", type=int, choices=range(1, 9), default=1,
                    help="Block ID a calibrar (1-8, padrão: 1)")
+    p.add_argument("--position", type=str, default="center",
+                   help="Posição da carga (center/upper/lower/left/right/full_body)")
+    p.add_argument("--repetition", type=int, default=1,
+                   help="Número da repetição do ensaio (padrão: 1)")
     p.add_argument("--output", type=str, default="calibration.json",
                    help="Arquivo de saída (padrão: calibration.json)")
+    p.add_argument("--sessions-dir", type=str, default="sessions",
+                   help="Diretório dos arquivos CSV de sessão (padrão: sessions)")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     block_id = args.block
+    position_tag = args.position.strip().lower()
+    repetition = args.repetition
     output_path = Path(args.output)
+
+    session_logger = CalibrationSessionLogger(output_dir=args.sessions_dir)
+    session_id = session_logger.generate_session_id()
 
     existing = _load_existing(output_path)
     blocos_prontos = list(existing.get("blocks", {}).keys())
 
     print(f"\n{'='*60}")
-    print(f"  CALIBRAÇÃO — Bloco {block_id}")
+    print(f"  CALIBRAÇÃO — Bloco {block_id} | Posição: {position_tag} | Repetição: {repetition}")
+    print(f"  Sessão ID: {session_id[:8]}...")
     print(f"{'='*60}")
     if blocos_prontos:
-        print(f"  Blocos já calibrados: {', '.join(blocos_prontos)}")
+        print(f"  Blocos já calibrados no JSON: {', '.join(blocos_prontos)}")
     print("""
 PREPARAÇÃO FÍSICA:
   - Placa rígida e plana posicionada sobre o bloco alvo.
@@ -291,6 +304,37 @@ PREPARAÇÃO FÍSICA:
         weight_kg_list.append(kg)
         raw_sum_list.append(media)
         print(f"  Ponto [{len(weight_kg_list) - 1}] salvo: {kg:.3f} kg → sum={media:.1f}")
+
+        # Identifica tara e estimativa para log metrológico
+        if 0.0 in weight_kg_list:
+            cur_tare = raw_sum_list[weight_kg_list.index(0.0)]
+        else:
+            cur_tare = float(existing.get("blocks", {}).get(str(block_id), {}).get("tare_block_sum", 0.0))
+
+        block_calib = existing.get("blocks", {}).get(str(block_id))
+        est_kg = None
+        if block_calib and "coefficients" in block_calib:
+            net_val = max(0.0, media - cur_tare)
+            est_kg = round(float(np.polyval(block_calib["coefficients"], net_val)), 3)
+
+        csv_file = session_logger.log_calibration_point(
+            session_id=session_id,
+            block_id=block_id,
+            reference_kg=kg,
+            position_tag=position_tag,
+            repetition=repetition,
+            raw_sum=media,
+            net_sum=max(0.0, media - cur_tare),
+            mean=media,
+            std=std,
+            cv_pct=cv,
+            estimated_kg=est_kg,
+            stability_state="stable" if estavel else "transient",
+            time_since_load_s=float(SAMPLE_SECONDS),
+            tare_block_sum=cur_tare,
+        )
+        if csv_file:
+            print(f"  [CSV] Registrado em: {csv_file.name}")
         print("  (use 'r' para desfazer este ponto se necessário)\n")
 
     device.close()
