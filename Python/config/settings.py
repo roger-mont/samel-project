@@ -18,11 +18,23 @@ HID_ROWS: int = 32
 HID_COLS: int = 64
 HID_PACKET_SIZE: int = 64  # bytes por report HID
 
+# Dimensões físicas reais da manta (para integração 2D - Modelo B)
+MANTA_WIDTH_M: float = 0.90    # largura da maca (m)
+MANTA_HEIGHT_M: float = 1.80   # comprimento da maca (m)
+PIXEL_AREA_M2: float = (MANTA_WIDTH_M / HID_COLS) * (MANTA_HEIGHT_M / HID_ROWS)
+
 API_PORT: int = 8000
 API_HOST: str = "0.0.0.0"
 TARE_SAMPLE_COUNT: int = 5
 TARE_FILE: str = "tare.json"
 WS_PUSH_INTERVAL_SECONDS: int = 10
+
+# Critério de estabilidade (Metodologia §13)
+STABILITY_EPSILON_KG: float = 0.3       # |Δm| máximo entre frames consecutivos
+STABILITY_TMIN_S: float = 10.0          # janela mínima para travar o peso
+STABILITY_VARIANCE_KG2: float = 0.25    # variância máxima da janela
+STABILITY_DRIFT_KG_S: float = 0.15      # drift máximo em kg/s
+STABILITY_WINDOW_SIZE: int = 20         # frames na janela de variância/drift
 
 
 @dataclass

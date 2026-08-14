@@ -114,11 +114,31 @@
                 <div class="dash-card weight-card" id="weight-card">
                     <div class="card-icon">⚖️</div>
                     <div class="card-body">
-                        <span class="card-label">Peso Estimado</span>
-                        <div class="card-value-row">
-                            <span class="card-value" id="weight-value">0.00</span>
-                            <span class="card-unit">kg</span>
+                        <!-- Peso travado (destaque) -->
+                        <div class="locked-weight-section" id="locked-weight-section" style="display:none;">
+                            <span class="locked-label">PESO ESTÁVEL ✓</span>
+                            <div class="card-value-row locked-row">
+                                <span class="card-value locked-value" id="locked-weight-value">0.00</span>
+                                <span class="card-unit locked-unit">kg</span>
+                            </div>
                         </div>
+                        <!-- Peso em tempo real (secundário) -->
+                        <span class="card-label realtime-label">Leitura atual</span>
+                        <div class="card-value-row realtime-row">
+                            <span class="card-value realtime-value" id="weight-value">0.00</span>
+                            <span class="card-unit realtime-unit">kg</span>
+                        </div>
+                        <!-- Força em Newton -->
+                        <div class="force-row">
+                            <span class="force-label">F =</span>
+                            <span class="force-value" id="force-value">0.00</span>
+                            <span class="force-unit">N</span>
+                        </div>
+                        <!-- Barra de progresso de estabilidade -->
+                        <div class="stability-progress" id="stability-progress">
+                            <div class="stability-bar" id="stability-bar"></div>
+                        </div>
+                        <span class="stability-hint" id="stability-hint">Estabilizando...</span>
                     </div>
                 </div>
                 <div class="dash-card timer-card" id="timer-card">

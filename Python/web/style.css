@@ -372,6 +372,7 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    width: 100%;
 }
 
 .card-label {
@@ -401,6 +402,116 @@ html, body {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-secondary);
+}
+
+/* Locked Weight & Stability Styles (Metodologia §13) */
+.weight-card.weight-locked {
+    border-color: hsla(150, 80%, 45%, 0.35);
+    box-shadow: 0 0 20px hsla(150, 80%, 45%, 0.12);
+}
+
+.weight-card.weight-locked::before {
+    background: var(--accent-green);
+}
+
+.locked-weight-section {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.locked-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--accent-green);
+    text-transform: uppercase;
+    display: block;
+}
+
+.locked-row .locked-value {
+    font-size: 32px;
+    color: var(--accent-green);
+    text-shadow: 0 0 12px hsla(150, 80%, 45%, 0.3);
+}
+
+.locked-row .locked-unit {
+    font-size: 16px;
+    color: var(--accent-green);
+    font-weight: 600;
+}
+
+.realtime-label {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.realtime-row .realtime-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+.realtime-row .realtime-unit {
+    font-size: 12px;
+}
+
+.force-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.force-label {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.force-value {
+    color: var(--accent-cyan);
+    font-weight: 600;
+}
+
+.force-unit {
+    color: var(--text-muted);
+}
+
+.stability-progress {
+    position: relative;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 6px;
+}
+
+.stability-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+    border-radius: 2px;
+    transition: width 200ms ease-out, background var(--transition-smooth);
+}
+
+.stability-bar.locked {
+    background: var(--accent-green);
+}
+
+.stability-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 3px;
+    display: block;
+}
+
+.stability-hint.locked {
+    color: var(--accent-green);
+    font-weight: 600;
 }
 
 /* Timer progress */

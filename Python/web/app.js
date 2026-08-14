@@ -24,6 +24,13 @@
         btnTare: document.getElementById("btn-tare"),
         btnTareClear: document.getElementById("btn-tare-clear"),
         maxPressureValue: document.getElementById("max-pressure-value"),
+        weightCard: document.getElementById("weight-card"),
+        lockedWeightSection: document.getElementById("locked-weight-section"),
+        lockedWeightValue: document.getElementById("locked-weight-value"),
+        forceValue: document.getElementById("force-value"),
+        stabilityProgress: document.getElementById("stability-progress"),
+        stabilityBar: document.getElementById("stability-bar"),
+        stabilityHint: document.getElementById("stability-hint"),
     };
 
     const ctx = DOM.canvas.getContext("2d");
@@ -175,8 +182,49 @@
     }
 
     /* --- Dashboard Updates --- */
-    function updateWeight(kg) {
-        DOM.weightValue.textContent = kg.toFixed(2);
+    function updateWeight(data) {
+        if (!data) return;
+        const currentKg = data.weight_kg !== undefined ? data.weight_kg : 0.0;
+        const currentN = data.force_n !== undefined ? data.force_n : (currentKg * 9.81);
+        const isLocked = Boolean(data.is_locked);
+        const lockedKg = data.locked_weight_kg !== undefined ? data.locked_weight_kg : 0.0;
+        const progressPct = data.stable_progress_pct !== undefined ? data.stable_progress_pct : 0.0;
+
+        DOM.weightValue.textContent = currentKg.toFixed(2);
+        if (DOM.forceValue) {
+            DOM.forceValue.textContent = currentN.toFixed(1);
+        }
+
+        if (isLocked && lockedKg > 0) {
+            if (DOM.lockedWeightSection) DOM.lockedWeightSection.style.display = "block";
+            if (DOM.lockedWeightValue) DOM.lockedWeightValue.textContent = lockedKg.toFixed(2);
+            if (DOM.weightCard) DOM.weightCard.classList.add("weight-locked");
+            if (DOM.stabilityBar) {
+                DOM.stabilityBar.style.width = "100%";
+                DOM.stabilityBar.classList.add("locked");
+            }
+            if (DOM.stabilityHint) {
+                DOM.stabilityHint.textContent = "Peso travado com sucesso ✓";
+                DOM.stabilityHint.classList.add("locked");
+            }
+        } else {
+            if (DOM.lockedWeightSection) DOM.lockedWeightSection.style.display = "none";
+            if (DOM.weightCard) DOM.weightCard.classList.remove("weight-locked");
+            if (DOM.stabilityBar) {
+                DOM.stabilityBar.style.width = `${Math.min(100, Math.max(0, progressPct))}%`;
+                DOM.stabilityBar.classList.remove("locked");
+            }
+            if (DOM.stabilityHint) {
+                DOM.stabilityHint.classList.remove("locked");
+                if (currentKg < 0.5) {
+                    DOM.stabilityHint.textContent = "Sem carga na maca";
+                } else if (progressPct > 0) {
+                    DOM.stabilityHint.textContent = `Estabilizando... ${Math.round(progressPct)}%`;
+                } else {
+                    DOM.stabilityHint.textContent = "Aguardando estabilização...";
+                }
+            }
+        }
     }
 
     function formatTimer(seconds) {
@@ -307,7 +355,7 @@
             if (!data) return;
 
             renderHeatmap(data.heatmap, data.rows, data.cols);
-            updateWeight(data.weight_kg);
+            updateWeight(data);
             updateStatus(data.status);
             DOM.gridSize.textContent = `${data.rows}×${data.cols}`;
 

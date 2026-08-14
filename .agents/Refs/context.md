@@ -1,56 +1,68 @@
-# Contexto e Arquitetura do Projeto: Matriz de Sensores FSR
+# Contexto e Arquitetura do Projeto: Manta de Sensores FSR (WangYing)
 
-Este documento resume as especificações de hardware, a modelagem matemática e os requisitos de software para a construção do sistema de captação e processamento de dados de uma matriz de sensores de pressão FSR.
+Este documento resume as especificações reais de hardware, a modelagem físico-matemática e os requisitos de software do sistema de monitoramento de pressão e peso em maca hospitalar.
 
 ---
 
 ## 1. Topologia de Hardware e Captação
 
-O projeto consiste em uma matriz de Force Sensing Resistors (FSR). Atualmente operando em um **protótipo 3x3**, mas a arquitetura de software deve ser construída para escalar nativamente para a matriz real de **16x16**.
+O sistema utiliza uma manta hospitalar com matriz de Force Sensing Resistors (FSR) conectada via USB HID.
 
-*   **Varredura Ativa (Polling):** O microcontrolador (código em C) energiza uma linha por vez e varre as colunas usando um multiplexador analógico (CD74HC4067).
-*   **Circuito de Leitura:** Utiliza um divisor de tensão coletivo. Os sensores FSR estão no polo positivo e há um resistor fixo de pull-down de **10kΩ** no polo negativo (conectado ao GND).
-*   **Transmissão:** Os dados são enviados do microcontrolador para o PC via Serial/USB HID em pacotes ("frames" da matriz completa) a uma taxa de **50 a 100Hz**.
-*   **Dados Brutos:** O PC recebe apenas os valores crus do ADC (ex: 0 a 1023 para 10-bit).
+*   **Matriz Global:** 32 linhas × 64 colunas (2.048 sensores/células).
+*   **Setores Físicos:** 8 blocos de 16×16 interligados.
+*   **Interface USB:** Protocolo HID proprietário (VID: `0x1ACC` / 6860, PID: `0x1A4D` / 6733).
+*   **Transmissão:** Pacotes de 64 bytes contendo coordenadas locais e intensidade de pressão pré-processada pelo microcontrolador na faixa de **0 a 255** a ~40 Hz (25 ms por frame).
+*   **Unidade Mínima de Calibração Física:** Bloco 16×16 (acesso por slice matricial `BLOCK_REGIONS`).
 
 ---
 
 ## 2. Modelagem Matemática (Backend Python)
 
-Como o hardware lê um sensor por vez, mas envia o "frame" completo, o backend em Python deve usar a biblioteca **NumPy** para aplicar cálculos de forma vetorizada na matriz inteira instantaneamente, evitando gargalos de loop.
+Como o protocolo HID entrega intensidades 0–255 diretamente, o pipeline aplica processamento vetorizado com **NumPy/SciPy**:
 
-O pipeline matemático para calcular o peso real a partir do valor bruto do ADC segue estes passos:
+### Pipeline Físico-Matemático
 
-### Cálculo de Tensão e Resistência
-Conversão da leitura bruta para tensão ($V_{out}$) e descoberta da resistência do sensor pressionado ($R_{FSR}$):
-$$V_{out} = Valor_{ADC} \cdot \left( \frac{V_{cc}}{Resolução_{ADC}} \right)$$
-$$R_{FSR} = R_{fixo} \cdot \left( \frac{V_{cc}}{V_{out}} - 1 \right)$$
+1.  **Filtragem de Ruído de Fundo (Deadzone):**
+    Sensores com leitura abaixo de `deadzone_threshold` são zerados para eliminar ruídos elétricos e peso do lençol:
+    $$S_{net}(x,y) = \begin{cases} S(x,y), & \text{se } S(x,y) > \text{limiar} \\ 0, & \text{caso contrário} \end{cases}$$
 
-### Conversão para Condutância e Força
-A condutância ($C$) possui resposta quase linear em relação à força, permitindo o uso da equação da reta ($y = mx + b$) com coeficientes de calibração empíricos ($m$ e $b$):
-$$C = \frac{1}{R_{FSR}}$$
-$$F(x,y) = m \cdot C + b$$
+2.  **Calibração Empírica por Bloco (Sinal → Newton):**
+    Cada bloco $k$ possui uma curva polinomial empírica que converte a soma líquida de leituras do bloco em força ($N$):
+    $$F_k = \text{polyval}(P_k, \sum S_{net, k} - \text{tara}_k)$$
 
-### Filtragem e Massa Total
-Para mitigar correntes de fuga (crosstalk), aplica-se uma Zona Morta (deadzone), zerando forças abaixo de um limiar mínimo. A massa total é calculada somando todas as coordenadas e dividindo pela gravidade ($g$):
-$$Massa_{Total} = \frac{\sum_{x} \sum_{y} F(x,y)}{9.81}$$
+3.  **Força Total e Massa Equivalente:**
+    A força total sobre a manta é somada e convertida em massa ($kg$) dividindo pela aceleração da gravidade ($g = 9,81 \text{ m/s}^2$):
+    $$F_{total} = \sum_{k=1}^{8} F_k \quad (\text{em Newtons})$$
+    $$m_{física} = \frac{F_{total}}{9,81} \quad (\text{em kg})$$
+
+4.  **Suavização Temporal (EMA):**
+    $$m_{EMA}(t) = \alpha \cdot m_{física}(t) + (1 - \alpha) \cdot m_{EMA}(t-1)$$
+
+5.  **Critério de Estabilidade e Weight Lock (Metodologia §13):**
+    O peso é considerado estável e travado quando preenche simultaneamente:
+    *   $|m(t) - m(t-\Delta t)| < \epsilon$ ($\epsilon = 0,3 \text{ kg}$)
+    *   $\text{variância}(\text{janela}) < 0,25 \text{ kg}^2$
+    *   $\text{drift} < 0,15 \text{ kg/s}$
+    *   Condição mantida ininterruptamente por $T_{min} \ge 10 \text{ s}$.
 
 ---
 
-## 3. Requisitos de Regra de Negócio
+## 3. Regras de Negócio e Monitoramento Clínico
 
-*   **Filtro de Estabilização:** A massa final deve passar por um filtro de Média Móvel Exponencial (EMA) para suavizar a leitura na interface gráfica.
-*   **Monitoramento de Posição (Alerta):** O sistema deve analisar continuamente o mapa de força (distribuição de pressão). Se a pessoa mantiver a mesma distribuição de peso/centro de massa (dentro de uma margem de tolerância) por **1 minuto ininterrupto**, o sistema deve emitir um alerta indicando inatividade prolongada na mesma postura.
+*   **Tara Dinâmica:** Capacidade de zerar a leitura base com colchão e lençol instalados (persistido em `tare.json`).
+*   **Monitoramento de Postura Estática (Alerta de Escaras):** O sistema monitora continuamente o centro de pressão e distribuição da carga. Se o paciente permanecer na mesma postura por período superior ao timeout configurado (padrão: 60 s), dispara um alerta visual de redistribuição de pressão.
+*   **Log Metrológico de Calibração:** Registro estruturado em CSV de cada ensaio experimental conforme a Metodologia §11 (pasta `sessions/`).
 
 ---
 
-## 4. Estrutura do Software Front/Back
+## 4. Arquitetura de Software
 
-*   **Linguagem Base:** Python.
-*   **Diretório:** Todos os códigos e dependências Python devem ficar restritos à pasta `/Python`.
-*   **Interface Gráfica (UI):** Deve ser construída utilizando uma tecnologia de **Webview** (ex: `Eel`, `pywebview` ou `Dash/Streamlit`).
-*   **Elementos da UI:**
-    *   Mapa de calor (Heatmap) renderizando o espectro de pressão em tempo real (escala automática do protótipo 3x3 para 16x16).
-    *   Exibição numérica do Peso Total (Kg).
-    *   Cronômetro de inatividade / postura estática, acoplado ao alerta visual de 1 minuto.
-    *   Painel interativo para edição de variáveis de calibração em tempo real (VCC, Resolução ADC, Resistor Fixo, Fator M, Offset B e limiar de Zona Morta).
+*   **Backend:** Python 3.10+ (`/Python`).
+*   **Comunicação Frontend:** Ponte bidirecional via **Eel (Webview / Chromium)** com API REST e WebSocket para integração com sistemas externos.
+*   **Componentes da UI:**
+    *   Mapa de calor (*Heatmap*) 32×64 renderizado via HTML5 Canvas com interpolação espectral.
+    *   Card de Peso com exibição de Leitura Atual, Força em Newtons e Peso Estável Travado (destaque verde).
+    *   Barra de progresso de estabilização em tempo real.
+    *   Cronômetro de postura com barra de timeout e alerta modal de redistribuição.
+    *   Painel de ajuste de parâmetros em runtime (Deadzone, EMA Alpha, Tolerância e Timeout de Postura).
+    *   Controles de Tara (aplicar/remover).

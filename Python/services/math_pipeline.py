@@ -73,6 +73,54 @@ def compute_total_mass(
     return force_n / GRAVITY_M_S2
 
 
+def compute_model_a(
+    pressure_matrix: np.ndarray,
+    calib: CalibData | None = None,
+) -> float:
+    """Modelo A (Metodologia §15): Soma direta de forças calibradas por bloco.
+
+    F_A = Σ_k F_k(soma_k)  →  m_A = F_A / g
+    """
+    return compute_total_mass(pressure_matrix, calib)
+
+
+def _trapezoid_1d(y: np.ndarray, axis: int = -1) -> np.ndarray:
+    """Calcula a regra trapezoidal 1D de forma compatível com NumPy 1.x e 2.x."""
+    if hasattr(np, "trapezoid"):
+        return np.trapezoid(y, axis=axis)
+    if hasattr(np, "trapz"):
+        return getattr(np, "trapz")(y, axis=axis)
+    if y.shape[axis] < 2:
+        return np.sum(y, axis=axis)
+    return np.sum(y, axis=axis) - 0.5 * (np.take(y, 0, axis=axis) + np.take(y, -1, axis=axis))
+
+
+def compute_model_b(
+    pressure_matrix: np.ndarray,
+    calib: CalibData | None = None,
+) -> float:
+    """Modelo B (Metodologia §16): Integração numérica 2D trapezoidal do campo de força.
+
+    F_B ≈ ∬ p(x,y) dA  →  m_B = F_B / g
+    """
+    if calib is None or not calib.is_valid:
+        return compute_total_mass(pressure_matrix, calib)
+
+    force_field = calib.matrix_to_force_field(pressure_matrix)
+    if float(np.sum(force_field)) <= 0.0:
+        return 0.0
+
+    # Integração trapezoidal 2D: ao longo das colunas e depois das linhas
+    f_rows = _trapezoid_1d(force_field, axis=1)
+    integrated_n = float(_trapezoid_1d(f_rows, axis=0))
+
+    # Proteção para grades com poucos pontos ativos discretos
+    if integrated_n <= 0.0:
+        integrated_n = float(np.sum(force_field))
+
+    return integrated_n / GRAVITY_M_S2
+
+
 def apply_ema(current: float, previous: float, alpha: float) -> float:
     """Média Móvel Exponencial para suavização do peso total exibido.
 

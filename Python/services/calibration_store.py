@@ -69,8 +69,11 @@ class _BlockCalib:
 
     def sum_to_newton(self, raw_sum: float) -> float:
         """Converte soma bruta do bloco em força (Newton) via polinômio."""
-        net = max(0.0, raw_sum - self.tare)
-        return max(0.0, float(np.polyval(self.coefficients, net)))
+        if raw_sum <= self.tare:
+            return 0.0
+        net = raw_sum - self.tare
+        val = float(np.polyval(self.coefficients, net))
+        return max(0.0, val)
 
     def sum_to_kg(self, raw_sum: float) -> float:
         """Converte soma bruta do bloco em massa (kg) = F / g."""
@@ -116,6 +119,21 @@ class CalibData:
     def matrix_to_kg(self, matrix: np.ndarray) -> float:
         """Converte a matriz 32×64 completa em massa (kg) = F_total / g."""
         return self.matrix_to_newton(matrix) / GRAVITY_M_S2
+
+    def matrix_to_force_field(self, matrix: np.ndarray) -> np.ndarray:
+        """Retorna matriz 32×64 com força em Newton por pixel (campo 2D)."""
+        force_field = np.zeros_like(matrix, dtype=np.float64)
+        for bid, (row_sl, col_sl) in BLOCK_REGIONS.items():
+            calb = self._resolve(bid)
+            if calb is None:
+                continue
+            block = matrix[row_sl, col_sl]
+            block_sum = float(block.sum())
+            if block_sum <= 0.0:
+                continue
+            f_total_block = calb.sum_to_newton(block_sum)
+            force_field[row_sl, col_sl] = (block / block_sum) * f_total_block
+        return force_field
 
     @classmethod
     def null(cls) -> "CalibData":

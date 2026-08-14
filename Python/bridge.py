@@ -1,6 +1,7 @@
 """Ponte Python↔JS via Eel — funções expostas para o frontend."""
 from __future__ import annotations
 
+import collections
 import logging
 import threading
 import time
@@ -8,10 +9,14 @@ import time
 import eel
 import numpy as np
 
-from config.settings import CalibrationParams, HID_ROWS, HID_COLS, TARE_SAMPLE_COUNT
+from config.settings import (
+    CalibrationParams, HID_ROWS, HID_COLS, TARE_SAMPLE_COUNT,
+    STABILITY_EPSILON_KG, STABILITY_TMIN_S,
+    STABILITY_VARIANCE_KG2, STABILITY_DRIFT_KG_S, STABILITY_WINDOW_SIZE,
+)
 from services.serial_reader import BaseFrameReader
 from services.math_pipeline import compute_force_matrix, compute_total_mass, apply_ema
-from services.calibration_store import CalibData, load_calibration
+from services.calibration_store import CalibData, load_calibration, GRAVITY_M_S2
 from providers.posture_monitor import PostureMonitor
 from services.tare_store import load_tare, save_tare
 
@@ -21,6 +26,7 @@ logger = logging.getLogger(__name__)
 _state_lock = threading.Lock()
 _current_heatmap: list[list[float]] = []
 _current_weight_kg: float = 0.0
+_current_force_n: float = 0.0
 _static_seconds: float = 0.0
 _is_alert: bool = False
 _connection_status: str = "desconectado"
@@ -29,6 +35,11 @@ _tare_pending: bool = False
 _tare_samples: list[float] = []
 _monitor_ref: PostureMonitor | None = None
 _reader_ref: BaseFrameReader | None = None
+
+# Weight lock — estabilidade (Metodologia §13)
+_weight_locked: bool = False
+_locked_weight_kg: float = 0.0
+_stable_consecutive_s: float = 0.0
 
 
 def start_reading_loop(
@@ -49,20 +60,64 @@ def start_reading_loop(
     logger.info("loop de leitura iniciado")
 
 
+def _check_stability(
+    weight_history: collections.deque,
+    current_kg: float,
+    previous_kg: float,
+    dt_s: float,
+) -> bool:
+    """Retorna True se o frame atual é estável conforme todos os critérios.
+
+    Critérios combinados:
+      1. |m(t) - m(t-1)| < STABILITY_EPSILON_KG   (Metodologia §13)
+      2. variance(janela) < STABILITY_VARIANCE_KG2
+      3. drift < STABILITY_DRIFT_KG_S
+    """
+    # Critério 1 — delta entre frames consecutivos
+    delta = abs(current_kg - previous_kg)
+    if delta >= STABILITY_EPSILON_KG:
+        return False
+
+    # Critérios 2 e 3 — só avaliáveis com janela suficiente
+    if len(weight_history) < 3:
+        return delta < STABILITY_EPSILON_KG
+
+    window = np.array(weight_history)
+    variance = float(np.var(window))
+    if variance >= STABILITY_VARIANCE_KG2:
+        return False
+
+    # Drift: diferença entre primeiro e último da janela, normalizada pelo tempo
+    window_duration_s = len(window) * dt_s
+    if window_duration_s > 0:
+        drift = abs(float(window[-1] - window[0])) / window_duration_s
+        if drift >= STABILITY_DRIFT_KG_S:
+            return False
+
+    return True
+
+
 def _reading_loop(
     reader: BaseFrameReader,
     params: CalibrationParams,
     monitor: PostureMonitor,
     calib: CalibData,
 ) -> None:
-    global _current_heatmap, _current_weight_kg
+    global _current_heatmap, _current_weight_kg, _current_force_n
     global _static_seconds, _is_alert, _connection_status
     global _tare_offset_kg, _tare_pending, _tare_samples
+    global _weight_locked, _locked_weight_kg, _stable_consecutive_s
 
     previous_weight = 0.0
+    weight_history: collections.deque = collections.deque(maxlen=STABILITY_WINDOW_SIZE)
+    last_frame_time = time.monotonic()
 
     while True:
         try:
+            frame_start = time.monotonic()
+            dt_s = frame_start - last_frame_time
+            last_frame_time = frame_start
+
             connected = reader.is_connected()
             adc_matrix = reader.read_frame()
 
@@ -73,14 +128,42 @@ def _reading_loop(
             smoothed_mass = apply_ema(raw_mass, previous_weight, snap["ema_alpha"])
             previous_weight = smoothed_mass
 
-            # Peso líquido — leitura de _tare_offset_kg sem lock (GIL-safe em CPython)
+            # Peso líquido
             net_mass = max(0.0, smoothed_mass - _tare_offset_kg)
+
+            # Força total em Newton (para exibição)
+            from services.math_pipeline import compute_total_force
+            force_n = compute_total_force(force_matrix, calib)
+
+            # Weight lock — critério de estabilidade combinado
+            weight_history.append(net_mass)
+            frame_stable = _check_stability(weight_history, net_mass, previous_weight, dt_s)
+
+            if frame_stable and net_mass > 0.5:
+                _stable_consecutive_s += dt_s
+                if _stable_consecutive_s >= STABILITY_TMIN_S and not _weight_locked:
+                    _weight_locked = True
+                    _locked_weight_kg = net_mass
+                    logger.info("peso travado: %.2f kg (estável por %.1fs)", net_mass, _stable_consecutive_s)
+            else:
+                if _stable_consecutive_s > 0:
+                    _stable_consecutive_s = 0.0
+                if net_mass < 0.5:
+                    _weight_locked = False
+                    _locked_weight_kg = 0.0
+
+            # Detecção de mudança significativa → destrava
+            if _weight_locked and abs(net_mass - _locked_weight_kg) > STABILITY_EPSILON_KG * 3:
+                _weight_locked = False
+                _locked_weight_kg = 0.0
+                _stable_consecutive_s = 0.0
+                logger.info("peso destravado: variacao significativa detectada")
 
             monitor.update_tolerance(snap["posture_tolerance"])
             monitor.update_timeout(snap["posture_timeout_seconds"])
             alert = monitor.update(force_matrix)
 
-            # Normaliza heatmap para 0-1 (frontend escala para cor)
+            # Normaliza heatmap para 0-1
             max_val = float(np.max(force_matrix))
             normalized = force_matrix / max_val if max_val > 0 else force_matrix
 
@@ -97,6 +180,7 @@ def _reading_loop(
 
                 _current_heatmap = normalized.tolist()
                 _current_weight_kg = net_mass
+                _current_force_n = force_n
                 _static_seconds = monitor.elapsed_seconds
                 _is_alert = alert
                 _connection_status = "conectado" if connected else "desconectado"
@@ -116,14 +200,19 @@ def _reading_loop(
 def get_sensor_data() -> dict:
     """Retorna snapshot dos dados atuais para o frontend."""
     with _state_lock:
+        progress = min(100.0, _stable_consecutive_s / STABILITY_TMIN_S * 100) if STABILITY_TMIN_S > 0 else 0.0
         return {
             "heatmap": _current_heatmap,
             "weight_kg": round(_current_weight_kg, 2),
+            "force_n": round(_current_force_n, 2),
             "static_seconds": round(_static_seconds, 1),
             "is_alert": _is_alert,
             "rows": HID_ROWS,
             "cols": HID_COLS,
             "status": _connection_status,
+            "is_locked": _weight_locked,
+            "locked_weight_kg": round(_locked_weight_kg, 2),
+            "stable_progress_pct": round(progress, 1),
         }
 
 
@@ -177,12 +266,15 @@ def get_current_snapshot() -> dict:
     with _state_lock:
         return {
             "weight_kg": round(_current_weight_kg, 2),
+            "force_n": round(_current_force_n, 2),
             "is_alert": _is_alert,
             "status": _connection_status,
             "static_seconds": round(_static_seconds, 1),
             "tare_active": _tare_offset_kg > 0.0,
             "tare_pending": _tare_pending,
             "tare_offset_kg": round(_tare_offset_kg, 3),
+            "is_locked": _weight_locked,
+            "locked_weight_kg": round(_locked_weight_kg, 2),
         }
 
 
