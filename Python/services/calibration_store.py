@@ -1,18 +1,25 @@
-"""Carrega calibração multi-bloco e converte matriz de pressão bruta em kg.
+"""Carrega calibração multi-bloco e converte matriz de pressão bruta em Newton/kg.
 
-Formato do calibration.json (v2):
+Formato do calibration.json (v3):
   {
-    "version": 2,
+    "version": 3,
     "blocks": {
-      "1": { "coefficients": [...], "tare_block_sum": 0.0, "rmse_kg": 0.21 },
-      "2": { ... },
-      ...
+      "1": {
+        "unit": "newton",
+        "coefficients_raw_to_n": [...],
+        "tare_block_sum": 0.0,
+        "rmse_n": 4.28,
+        "rmse_kg": 0.44,
+        "calibration_points": [
+          { "kg": 0.0, "n": 0.0, "raw_sum": 241.46 }
+        ]
+      }
     }
   }
 
 Estratégia de fallback por bloco:
   - Bloco com calibração própria  → usa sua curva
-  - Bloco sem calibração         → usa a curva do bloco com menor RMSE disponível
+  - Bloco sem calibração         → usa a curva do bloco com menor RMSE
   - Nenhum bloco calibrado       → retorna soma bruta
 """
 from __future__ import annotations
@@ -24,6 +31,8 @@ from pathlib import Path
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+GRAVITY_M_S2: float = 9.81
 
 BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
     1: (slice(16, 32), slice(0,  16)),
@@ -38,18 +47,34 @@ BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
 
 
 class _BlockCalib:
-    """Calibração de um único bloco 16×16."""
+    """Calibração de um único bloco 16×16.
 
-    __slots__ = ("coefficients", "tare", "rmse")
+    A curva polinomial converte net_sum → Newton.
+    A conversão para kg é feita dividindo por g (9.81 m/s²).
+    """
 
-    def __init__(self, coefficients: list[float], tare: float, rmse: float) -> None:
+    __slots__ = ("coefficients", "tare", "rmse_n", "rmse_kg")
+
+    def __init__(
+        self,
+        coefficients: list[float],
+        tare: float,
+        rmse_n: float,
+        rmse_kg: float,
+    ) -> None:
         self.coefficients = np.array(coefficients)
         self.tare = tare
-        self.rmse = rmse
+        self.rmse_n = rmse_n
+        self.rmse_kg = rmse_kg
 
-    def sum_to_kg(self, raw_sum: float) -> float:
+    def sum_to_newton(self, raw_sum: float) -> float:
+        """Converte soma bruta do bloco em força (Newton) via polinômio."""
         net = max(0.0, raw_sum - self.tare)
         return max(0.0, float(np.polyval(self.coefficients, net)))
+
+    def sum_to_kg(self, raw_sum: float) -> float:
+        """Converte soma bruta do bloco em massa (kg) = F / g."""
+        return self.sum_to_newton(raw_sum) / GRAVITY_M_S2
 
 
 class CalibData:
@@ -68,30 +93,29 @@ class CalibData:
     def _best_fallback(self) -> _BlockCalib | None:
         if not self.blocks:
             return None
-        return min(self.blocks.values(), key=lambda b: b.rmse)
+        return min(self.blocks.values(), key=lambda b: b.rmse_n)
 
     def _resolve(self, block_id: int) -> _BlockCalib | None:
         return self.blocks.get(block_id, self._fallback)
 
-    def matrix_to_kg(self, matrix: np.ndarray) -> float:
-        """Converte a matriz 32×64 completa em kg somando cada bloco.
-
-        Blocos com calibração própria usam sua curva.
-        Blocos sem calibração usam o fallback (bloco com menor RMSE).
-        """
+    def matrix_to_newton(self, matrix: np.ndarray) -> float:
+        """Converte a matriz 32×64 completa em força total (Newton)."""
         if not self.is_valid:
             return float(np.sum(matrix))
 
-        total = 0.0
+        total_n = 0.0
         for bid, (row_sl, col_sl) in BLOCK_REGIONS.items():
             block_sum = float(matrix[row_sl, col_sl].sum())
             calb = self._resolve(bid)
             if calb is not None:
-                total += calb.sum_to_kg(block_sum)
+                total_n += calb.sum_to_newton(block_sum)
             else:
-                total += block_sum  # fallback bruto (nunca deve ocorrer se is_valid)
+                total_n += block_sum
+        return total_n
 
-        return total
+    def matrix_to_kg(self, matrix: np.ndarray) -> float:
+        """Converte a matriz 32×64 completa em massa (kg) = F_total / g."""
+        return self.matrix_to_newton(matrix) / GRAVITY_M_S2
 
     @classmethod
     def null(cls) -> "CalibData":
@@ -103,19 +127,37 @@ class CalibData:
 
 
 # ---------------------------------------------------------------------------
-# Loader — suporta formato v1 (legado) e v2 (multi-bloco)
+# Loader — suporta v1, v2 e v3
 # ---------------------------------------------------------------------------
 
-def _parse_v2_blocks(raw: dict) -> dict[int, _BlockCalib]:
+def _build_block(bdata: dict) -> _BlockCalib:
+    """Constrói _BlockCalib a partir de um dict de bloco (v2 ou v3)."""
+    unit = bdata.get("unit", "kg")
+
+    if unit == "newton":
+        coeffs = bdata["coefficients_raw_to_n"]
+        rmse_n = float(bdata.get("rmse_n", 0.0))
+        rmse_kg = float(bdata.get("rmse_kg", rmse_n / GRAVITY_M_S2))
+    else:
+        # v2 legado: coeficientes em kg → converter para Newton
+        coeffs_kg = np.array(bdata["coefficients"])
+        coeffs = (coeffs_kg * GRAVITY_M_S2).tolist()
+        rmse_kg = float(bdata.get("rmse_kg", 0.0))
+        rmse_n = rmse_kg * GRAVITY_M_S2
+
+    return _BlockCalib(
+        coefficients=coeffs,
+        tare=float(bdata.get("tare_block_sum", 0.0)),
+        rmse_n=rmse_n,
+        rmse_kg=rmse_kg,
+    )
+
+
+def _parse_blocks(raw: dict) -> dict[int, _BlockCalib]:
     result: dict[int, _BlockCalib] = {}
     for bid_str, bdata in raw.get("blocks", {}).items():
         try:
-            bid = int(bid_str)
-            result[bid] = _BlockCalib(
-                coefficients=bdata["coefficients"],
-                tare=float(bdata.get("tare_block_sum", 0.0)),
-                rmse=float(bdata.get("rmse_kg", 0.0)),
-            )
+            result[int(bid_str)] = _build_block(bdata)
         except (KeyError, ValueError) as err:
             logger.warning("bloco %s malformado no calibration.json: %s", bid_str, err)
     return result
@@ -123,11 +165,15 @@ def _parse_v2_blocks(raw: dict) -> dict[int, _BlockCalib]:
 
 def _parse_v1_block(raw: dict) -> dict[int, _BlockCalib]:
     bid = int(raw.get("block_id", 1))
+    coeffs_kg = np.array(raw["coefficients"])
+    coeffs_n = (coeffs_kg * GRAVITY_M_S2).tolist()
+    rmse_kg = float(raw.get("rmse_kg", 0.0))
     return {
         bid: _BlockCalib(
-            coefficients=raw["coefficients"],
+            coefficients=coeffs_n,
             tare=float(raw.get("tare_block_sum", 0.0)),
-            rmse=float(raw.get("rmse_kg", 0.0)),
+            rmse_n=rmse_kg * GRAVITY_M_S2,
+            rmse_kg=rmse_kg,
         )
     }
 
@@ -135,7 +181,7 @@ def _parse_v1_block(raw: dict) -> dict[int, _BlockCalib]:
 def load_calibration(path: str | Path) -> CalibData:
     """Carrega calibration.json e retorna CalibData.
 
-    Aceita formato v1 (bloco único) e v2 (multi-bloco).
+    Aceita formato v1 (bloco único), v2 (multi-bloco, kg) e v3 (multi-bloco, Newton).
     Retorna CalibData.null() se arquivo ausente ou inválido.
     """
     calib_path = Path(path)
@@ -150,17 +196,19 @@ def load_calibration(path: str | Path) -> CalibData:
         return CalibData.null()
 
     try:
-        if raw.get("version") == 2:
-            blocks = _parse_v2_blocks(raw)
+        version = raw.get("version", 1)
+        if version in (2, 3):
+            blocks = _parse_blocks(raw)
         else:
-            blocks = _parse_v1_block(raw)  # migração silenciosa v1→v2
+            blocks = _parse_v1_block(raw)
     except (KeyError, ValueError) as err:
         logger.error("erro ao interpretar calibration.json: %s", err)
         return CalibData.null()
 
     calib = CalibData(blocks)
     logger.info(
-        "calibracao carregada: %d bloco(s) — IDs %s",
+        "calibracao carregada (v%s): %d bloco(s) — IDs %s",
+        version,
         len(blocks),
         sorted(blocks.keys()),
     )

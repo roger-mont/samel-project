@@ -108,15 +108,15 @@ def _read_block_sum(device: hid.device, block_id: int, duration_s: float) -> tup
 # ---------------------------------------------------------------------------
 
 def _load_existing(path: Path) -> dict:
-    """Carrega calibration.json existente (v1 ou v2) como dict interno."""
+    """Carrega calibration.json existente (v1, v2 ou v3) como dict interno."""
     if not path.exists():
-        return {"version": 2, "blocks": {}}
+        return {"version": 3, "blocks": {}}
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         print(f"  [AVISO] {path.name} corrompido — será recriado.")
-        return {"version": 2, "blocks": {}}
+        return {"version": 3, "blocks": {}}
 
     # Migração: formato v1 (single-block) → v2 (multi-block)
     if "version" not in data and "block_id" in data:
@@ -145,26 +145,33 @@ def _save_block(path: Path, block_id: int, block_data: dict) -> None:
 # Ajuste de curva
 # ---------------------------------------------------------------------------
 
+GRAVITY_M_S2: float = 9.81
+
+
 def _fit_curve(
-    weights: np.ndarray,
+    weights_kg: np.ndarray,
     sums_raw: np.ndarray,
     tare_sum: float,
-) -> tuple[list[float], float, np.ndarray]:
-    """Retorna (coefficients, rmse_kg, net_sums)."""
+) -> tuple[list[float], float, float, np.ndarray]:
+    """Ajusta net_sum → Newton. Retorna (coefficients_n, rmse_n, rmse_kg, net_sums)."""
     net = sums_raw - tare_sum
-    degree = min(2, len(weights) - 1)
-    coeffs = np.polyfit(net, weights, deg=degree).tolist()
-    predicted = np.polyval(coeffs, net)
-    rmse = float(np.sqrt(np.mean((predicted - weights) ** 2)))
-    return coeffs, rmse, net
+    forces_n = weights_kg * GRAVITY_M_S2
+    degree = min(2, len(weights_kg) - 1)
+    coeffs = np.polyfit(net, forces_n, deg=degree).tolist()
+    predicted_n = np.polyval(coeffs, net)
+    rmse_n = float(np.sqrt(np.mean((predicted_n - forces_n) ** 2)))
+    rmse_kg = rmse_n / GRAVITY_M_S2
+    return coeffs, rmse_n, rmse_kg, net
 
 
-def _print_table(weights: np.ndarray, net_sums: np.ndarray, coeffs: list[float]) -> None:
-    predicted = np.polyval(coeffs, net_sums)
-    print(f"\n  {'#':<4} {'Real (kg)':>10} {'Net Sum':>10} {'Predito':>10} {'Erro':>8}")
-    print("  " + "-" * 50)
-    for i, (kg_r, ns, pred) in enumerate(zip(weights, net_sums, predicted)):
-        print(f"  {i:<4} {kg_r:>10.3f} {ns:>10.1f} {pred:>10.3f} {kg_r - pred:>+8.3f}")
+def _print_table(weights_kg: np.ndarray, net_sums: np.ndarray, coeffs_n: list[float]) -> None:
+    forces_n = weights_kg * GRAVITY_M_S2
+    predicted_n = np.polyval(coeffs_n, net_sums)
+    predicted_kg = predicted_n / GRAVITY_M_S2
+    print(f"\n  {'#':<4} {'Real(kg)':>9} {'Real(N)':>9} {'NetSum':>10} {'Pred(N)':>9} {'Pred(kg)':>9} {'Err(kg)':>8}")
+    print("  " + "-" * 68)
+    for i, (kg, fn, ns, pn, pk) in enumerate(zip(weights_kg, forces_n, net_sums, predicted_n, predicted_kg)):
+        print(f"  {i:<4} {kg:>9.3f} {fn:>9.2f} {ns:>10.1f} {pn:>9.2f} {pk:>9.3f} {kg - pk:>+8.3f}")
 
 
 # ---------------------------------------------------------------------------
@@ -346,26 +353,28 @@ PREPARAÇÃO FÍSICA:
     zero_idx = np.where(weights == 0.0)[0]
     tare_sum = float(sums_raw[zero_idx[0]]) if len(zero_idx) > 0 else 0.0
 
-    coeffs, rmse, net_sums = _fit_curve(weights, sums_raw, tare_sum)
+    coeffs_n, rmse_n, rmse_kg, net_sums = _fit_curve(weights, sums_raw, tare_sum)
 
     print("\n" + "=" * 60)
-    print("  RESULTADO")
+    print("  RESULTADO (unidade interna: Newton)")
     print("=" * 60)
     print(f"  Tara (sum 0 kg):   {tare_sum:.1f}")
-    print(f"  Coeficientes:      {[round(c, 8) for c in coeffs]}")
-    print(f"  RMSE:              {rmse:.4f} kg")
-    if rmse > 1.5:
+    print(f"  Coeficientes (→N): {[round(c, 8) for c in coeffs_n]}")
+    print(f"  RMSE:              {rmse_n:.4f} N  ({rmse_kg:.4f} kg)")
+    if rmse_kg > 1.5:
         print("  [AVISO] RMSE > 1.5 kg — considere mais pontos intermediários.")
 
-    _print_table(weights, net_sums, coeffs)
+    _print_table(weights, net_sums, coeffs_n)
 
     block_data = {
+        "unit": "newton",
         "tare_block_sum": tare_sum,
         "polynomial_degree": min(2, len(weights) - 1),
-        "coefficients": coeffs,
-        "rmse_kg": round(rmse, 4),
+        "coefficients_raw_to_n": coeffs_n,
+        "rmse_n": round(rmse_n, 4),
+        "rmse_kg": round(rmse_kg, 4),
         "calibration_points": [
-            {"kg": float(k), "raw_sum": float(s)}
+            {"kg": float(k), "n": round(float(k) * GRAVITY_M_S2, 4), "raw_sum": float(s)}
             for k, s in zip(weights, sums_raw)
         ],
     }

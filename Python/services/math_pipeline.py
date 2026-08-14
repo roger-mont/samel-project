@@ -1,9 +1,10 @@
-"""Pipeline de pressão — aplica calibração e retorna kg por bloco.
+"""Pipeline de pressão — aplica calibração e retorna Newton/kg por bloco.
 
 Fluxo:
   matriz HID bruta (0-255)
     → deadzone (compute_force_matrix)
-    → conversão por bloco via curva polinomial (compute_total_mass)
+    → conversão por bloco via curva polinomial → Newton (compute_total_force)
+    → divisão por g → kg (compute_total_mass)
     → EMA temporal (apply_ema)
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ import logging
 import numpy as np
 
 from config.settings import CalibrationParams
-from services.calibration_store import CalibData
+from services.calibration_store import CalibData, GRAVITY_M_S2
 
 logger = logging.getLogger(__name__)
 
@@ -43,20 +44,33 @@ def compute_force_matrix(
     return result
 
 
+def compute_total_force(
+    pressure_matrix: np.ndarray,
+    calib: CalibData | None = None,
+) -> float:
+    """Converte a matriz de pressão em força total (Newton).
+
+    Usa calibração por bloco. Se `calib` for None ou inválido,
+    retorna a soma bruta como fallback (sem unidade física).
+    """
+    if calib is not None and calib.is_valid:
+        return calib.matrix_to_newton(pressure_matrix)
+
+    logger.debug("sem calibração válida — usando soma bruta")
+    return float(np.sum(pressure_matrix))
+
+
 def compute_total_mass(
     pressure_matrix: np.ndarray,
     calib: CalibData | None = None,
 ) -> float:
-    """Converte a matriz de pressão em kg usando calibração por bloco.
+    """Converte a matriz de pressão em massa (kg) = F_total / g.
 
-    Se `calib` for None ou inválido, retorna a soma bruta como fallback.
+    Passo explícito: primeiro calcula força em Newton,
+    depois divide por gravidade (9.81 m/s²).
     """
-    if calib is not None and calib.is_valid:
-        return calib.matrix_to_kg(pressure_matrix)
-
-    # Fallback — sem calibração carregada
-    logger.debug("sem calibração válida — usando soma bruta")
-    return float(np.sum(pressure_matrix))
+    force_n = compute_total_force(pressure_matrix, calib)
+    return force_n / GRAVITY_M_S2
 
 
 def apply_ema(current: float, previous: float, alpha: float) -> float:
