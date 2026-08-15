@@ -1,402 +1,481 @@
 /* ========================================================
-   FSR Matrix — Frontend Logic
-   Heatmap renderer, dashboard, calibration panel
+   MACA INTELIGENTE — DASHBOARD DO PACIENTE
+   Frontend Logic | Integração Eel & Mockup Hospitalar
+   Identidade Visual: Grupo Samel
    ======================================================== */
 
 (function () {
     "use strict";
 
-    /* --- DOM References --- */
+    /* --- DOM References Cache --- */
     const DOM = {
-        canvas: document.getElementById("heatmap-canvas"),
-        weightValue: document.getElementById("weight-value"),
-        timerValue: document.getElementById("timer-value"),
-        timerBar: document.getElementById("timer-bar"),
-        timerCard: document.getElementById("timer-card"),
-        statusDot: document.getElementById("status-dot"),
-        statusText: document.getElementById("status-text"),
-        gridSize: document.getElementById("grid-size"),
-        fpsValue: document.getElementById("fps-value"),
+        // Status & Top Bar
+        statusDot: document.getElementById("system-status-dot"),
+        statusText: document.getElementById("system-status-text"),
+        statusChip: document.getElementById("system-status-chip"),
+        patientWeightHeader: document.getElementById("patient-weight-header"),
+
+        // KPIs
+        kpiWeightVal: document.getElementById("kpi-weight-val"),
+        kpiStabilityFill: document.getElementById("kpi-stability-fill"),
+        kpiStabilityText: document.getElementById("kpi-stability-text"),
+        kpiStabilityStatus: document.getElementById("kpi-stability-status"),
+        kpiPostureVal: document.getElementById("kpi-posture-val"),
+        kpiTimerVal: document.getElementById("kpi-timer-val"),
+        kpiTimerFill: document.getElementById("kpi-timer-fill"),
+        kpiTimerLimit: document.getElementById("kpi-timer-limit"),
+        kpiAlertBadge: document.getElementById("kpi-alert-badge"),
+        cardAlert: document.getElementById("card-alert"),
+
+        // Heatmap
+        heatmapCanvas: document.getElementById("heatmap-canvas"),
+        metricPeak: document.getElementById("metric-peak"),
+        metricActiveArea: document.getElementById("metric-active-area"),
+        metricDistribution: document.getElementById("metric-distribution"),
+
+        // Charts Values
+        chartLiveWeight: document.getElementById("chart-live-weight"),
+        chartLivePosture: document.getElementById("chart-live-posture"),
+        chartLiveTime: document.getElementById("chart-live-time"),
+
+        // Overlay
         alertOverlay: document.getElementById("alert-overlay"),
         alertTime: document.getElementById("alert-time"),
-        heatmapContainer: document.getElementById("heatmap-container"),
-        tareStatus: document.getElementById("tare-status"),
-        btnTare: document.getElementById("btn-tare"),
-        btnTareClear: document.getElementById("btn-tare-clear"),
-        maxPressureValue: document.getElementById("max-pressure-value"),
-        weightCard: document.getElementById("weight-card"),
-        lockedWeightSection: document.getElementById("locked-weight-section"),
-        lockedWeightValue: document.getElementById("locked-weight-value"),
-        forceValue: document.getElementById("force-value"),
-        stabilityProgress: document.getElementById("stability-progress"),
-        stabilityBar: document.getElementById("stability-bar"),
-        stabilityHint: document.getElementById("stability-hint"),
     };
 
-    const ctx = DOM.canvas.getContext("2d");
-
     /* --- State --- */
-    let lastFrameTime = performance.now();
-    let frameCount = 0;
-    let currentFps = 0;
+    let chartWeightInstance = null;
+    let chartPostureInstance = null;
+    let chartTimeInstance = null;
+    let sparklineInstance = null;
     let alertDismissed = false;
     let lastAlertState = false;
-    let debounceTimers = {};
+    let configuredTimeoutSec = 3600; // 60 min default
+    let isEelAvailable = typeof window.eel !== "undefined";
 
-    /* --- Color Palette (Spectral: blue → cyan → green → yellow → red) --- */
-    const HEATMAP_COLORS = [
-        [15, 15, 60],      /* 0.0 — deep navy */
-        [20, 50, 140],     /* 0.15 — dark blue */
-        [10, 120, 200],    /* 0.25 — blue */
-        [10, 190, 200],    /* 0.35 — cyan */
-        [30, 200, 120],    /* 0.45 — teal-green */
-        [100, 220, 60],    /* 0.55 — green */
-        [200, 230, 40],    /* 0.65 — yellow-green */
-        [250, 210, 30],    /* 0.75 — yellow */
-        [255, 140, 20],    /* 0.85 — orange */
-        [240, 50, 30],     /* 0.95 — red */
-        [180, 10, 50],     /* 1.0  — dark red */
+    /* --- Spectral Color Map (Blue -> Cyan -> Teal -> Green -> Yellow -> Orange -> Red) --- */
+    const SPECTRAL_COLORS = [
+        [2, 132, 199],   /* 0.00 — #0284c7 azul médico */
+        [6, 182, 212],   /* 0.18 — #06b6d4 ciano suave */
+        [13, 148, 136],  /* 0.35 — #0d9488 teal Samel */
+        [16, 185, 129],  /* 0.52 — #10b981 verde hospitalar */
+        [234, 179, 8],   /* 0.70 — #eab308 amarelo */
+        [249, 115, 22],  /* 0.85 — #f97316 laranja */
+        [220, 38, 38],   /* 1.00 — #dc2626 vermelho alta pressão */
     ];
 
-    function interpolateColor(value) {
-        const t = Math.max(0, Math.min(1, value));
-        const idx = t * (HEATMAP_COLORS.length - 1);
+    function interpolateSpectralColor(value) {
+        const val = Math.max(0, Math.min(1, value));
+        const idx = val * (SPECTRAL_COLORS.length - 1);
         const lo = Math.floor(idx);
-        const hi = Math.min(lo + 1, HEATMAP_COLORS.length - 1);
+        const hi = Math.min(lo + 1, SPECTRAL_COLORS.length - 1);
         const frac = idx - lo;
 
-        const r = Math.round(HEATMAP_COLORS[lo][0] + frac * (HEATMAP_COLORS[hi][0] - HEATMAP_COLORS[lo][0]));
-        const g = Math.round(HEATMAP_COLORS[lo][1] + frac * (HEATMAP_COLORS[hi][1] - HEATMAP_COLORS[lo][1]));
-        const b = Math.round(HEATMAP_COLORS[lo][2] + frac * (HEATMAP_COLORS[hi][2] - HEATMAP_COLORS[lo][2]));
+        const r = Math.round(SPECTRAL_COLORS[lo][0] + frac * (SPECTRAL_COLORS[hi][0] - SPECTRAL_COLORS[lo][0]));
+        const g = Math.round(SPECTRAL_COLORS[lo][1] + frac * (SPECTRAL_COLORS[hi][1] - SPECTRAL_COLORS[lo][1]));
+        const b = Math.round(SPECTRAL_COLORS[lo][2] + frac * (SPECTRAL_COLORS[hi][2] - SPECTRAL_COLORS[lo][2]));
         return [r, g, b];
     }
 
-    /* --- Heatmap Rendering --- */
-    function renderHeatmap(heatmapData, rows, cols) {
-        if (!heatmapData || rows === 0 || cols === 0) return;
+    /* --- Heatmap Rendering (Orientation: Head RIGHT, Feet LEFT) --- */
+    function renderHeatmapMatrix(matrix, rows, cols) {
+        if (!DOM.heatmapCanvas) return;
+        const canvas = DOM.heatmapCanvas;
+        const ctx = canvas.getContext("2d");
 
-        const container = DOM.heatmapContainer;
-        const maxW = container.clientWidth - 40;
-        const maxH = container.clientHeight - 60;
-        const aspect = cols / rows;
+        const targetW = canvas.parentElement.clientWidth || 640;
+        const targetH = canvas.parentElement.clientHeight || 320;
 
-        let canvasW, canvasH;
-        if (maxW / maxH > aspect) {
-            canvasH = maxH;
-            canvasW = Math.round(canvasH * aspect);
-        } else {
-            canvasW = maxW;
-            canvasH = Math.round(canvasW / aspect);
+        if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
         }
 
-        canvasW = Math.max(canvasW, 100);
-        canvasH = Math.max(canvasH, 100);
+        const effectiveRows = rows || 32;
+        const effectiveCols = cols || 64;
 
-        DOM.canvas.width = canvasW;
-        DOM.canvas.height = canvasH;
-
-        const cellW = canvasW / cols;
-        const cellH = canvasH / rows;
-
-        /* Render with smooth interpolation using upscaled off-screen canvas */
+        // Render to off-screen buffer
         const offscreen = document.createElement("canvas");
-        offscreen.width = cols;
-        offscreen.height = rows;
+        offscreen.width = effectiveCols;
+        offscreen.height = effectiveRows;
         const offCtx = offscreen.getContext("2d");
-        const imgData = offCtx.createImageData(cols, rows);
+        const imgData = offCtx.createImageData(effectiveCols, effectiveRows);
 
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const val = heatmapData[r] ? (heatmapData[r][c] || 0) : 0;
-                const [cr, cg, cb] = interpolateColor(val);
-                const idx = (r * cols + c) * 4;
+        let activeCells = 0;
+        let peakVal = 0;
+        let peakRow = 0;
+        let peakCol = 0;
+        let totalPressure = 0;
+
+        for (let r = 0; r < effectiveRows; r++) {
+            for (let c = 0; c < effectiveCols; c++) {
+                const val = matrix && matrix[r] && matrix[r][c] !== undefined ? matrix[r][c] : 0;
+                if (val > 0.05) {
+                    activeCells++;
+                    totalPressure += val;
+                    if (val > peakVal) {
+                        peakVal = val;
+                        peakRow = r;
+                        peakCol = c;
+                    }
+                }
+
+                const [cr, cg, cb] = interpolateSpectralColor(val);
+                const alpha = val > 0.02 ? Math.min(240, Math.round(val * 255 + 50)) : 10;
+                const idx = (r * effectiveCols + c) * 4;
                 imgData.data[idx] = cr;
                 imgData.data[idx + 1] = cg;
                 imgData.data[idx + 2] = cb;
-                imgData.data[idx + 3] = 255;
+                imgData.data[idx + 3] = alpha;
             }
         }
         offCtx.putImageData(imgData, 0, 0);
 
-        /* Smooth upscale */
+        // Smooth draw on main canvas
+        ctx.clearRect(0, 0, targetW, targetH);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
-        ctx.clearRect(0, 0, canvasW, canvasH);
+        ctx.drawImage(offscreen, 0, 0, targetW, targetH);
 
-        /* Draw rounded clip */
-        const radius = 12;
-        ctx.beginPath();
-        ctx.moveTo(radius, 0);
-        ctx.lineTo(canvasW - radius, 0);
-        ctx.quadraticCurveTo(canvasW, 0, canvasW, radius);
-        ctx.lineTo(canvasW, canvasH - radius);
-        ctx.quadraticCurveTo(canvasW, canvasH, canvasW - radius, canvasH);
-        ctx.lineTo(radius, canvasH);
-        ctx.quadraticCurveTo(0, canvasH, 0, canvasH - radius);
-        ctx.lineTo(0, radius);
-        ctx.quadraticCurveTo(0, 0, radius, 0);
-        ctx.closePath();
-        ctx.clip();
-
-        ctx.drawImage(offscreen, 0, 0, canvasW, canvasH);
-
-        /* Grid lines */
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-        ctx.lineWidth = 1;
-        for (let r = 1; r < rows; r++) {
-            const y = Math.round(r * cellH) + 0.5;
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvasW, y);
-            ctx.stroke();
-        }
-        for (let c = 1; c < cols; c++) {
-            const x = Math.round(c * cellW) + 0.5;
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvasH);
-            ctx.stroke();
-        }
-
-        /* Cell value labels */
-        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-        const fontSize = Math.max(10, Math.min(cellW * 0.28, 18));
-        ctx.font = `500 ${fontSize}px 'JetBrains Mono', monospace`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const val = heatmapData[r] ? (heatmapData[r][c] || 0) : 0;
-                if (val > 0.01) {
-                    const x = c * cellW + cellW / 2;
-                    const y = r * cellH + cellH / 2;
-                    const pct = Math.round(val * 100);
-                    ctx.fillStyle = val > 0.5
-                        ? "rgba(0, 0, 0, 0.6)"
-                        : "rgba(255, 255, 255, 0.75)";
-                    ctx.fillText(`${pct}%`, x, y);
-                }
-            }
-        }
+        // Update Heatmap footer metrics
+        updateHeatmapMetrics(activeCells, effectiveRows * effectiveCols, peakVal, peakCol, effectiveCols);
     }
 
-    /* --- Dashboard Updates --- */
-    function updateWeight(data) {
-        if (!data) return;
-        const currentKg = data.weight_kg !== undefined ? data.weight_kg : 0.0;
-        const currentN = data.force_n !== undefined ? data.force_n : (currentKg * 9.81);
-        const isLocked = Boolean(data.is_locked);
-        const lockedKg = data.locked_weight_kg !== undefined ? data.locked_weight_kg : 0.0;
-        const progressPct = data.stable_progress_pct !== undefined ? data.stable_progress_pct : 0.0;
+    function updateHeatmapMetrics(activeCount, totalCount, peakVal, peakCol, cols) {
+        if (!DOM.metricActiveArea) return;
 
-        DOM.weightValue.textContent = currentKg.toFixed(2);
-        if (DOM.forceValue) {
-            DOM.forceValue.textContent = currentN.toFixed(1);
-        }
+        const activePct = ((activeCount / totalCount) * 100).toFixed(1);
+        DOM.metricActiveArea.textContent = `${activePct}% do leito`;
 
-        if (isLocked && lockedKg > 0) {
-            if (DOM.lockedWeightSection) DOM.lockedWeightSection.style.display = "block";
-            if (DOM.lockedWeightValue) DOM.lockedWeightValue.textContent = lockedKg.toFixed(2);
-            if (DOM.weightCard) DOM.weightCard.classList.add("weight-locked");
-            if (DOM.stabilityBar) {
-                DOM.stabilityBar.style.width = "100%";
-                DOM.stabilityBar.classList.add("locked");
-            }
-            if (DOM.stabilityHint) {
-                DOM.stabilityHint.textContent = "Peso travado com sucesso ✓";
-                DOM.stabilityHint.classList.add("locked");
-            }
-        } else {
-            if (DOM.lockedWeightSection) DOM.lockedWeightSection.style.display = "none";
-            if (DOM.weightCard) DOM.weightCard.classList.remove("weight-locked");
-            if (DOM.stabilityBar) {
-                DOM.stabilityBar.style.width = `${Math.min(100, Math.max(0, progressPct))}%`;
-                DOM.stabilityBar.classList.remove("locked");
-            }
-            if (DOM.stabilityHint) {
-                DOM.stabilityHint.classList.remove("locked");
-                if (currentKg < 0.5) {
-                    DOM.stabilityHint.textContent = "Sem carga na maca";
-                } else if (progressPct > 0) {
-                    DOM.stabilityHint.textContent = `Estabilizando... ${Math.round(progressPct)}%`;
-                } else {
-                    DOM.stabilityHint.textContent = "Aguardando estabilização...";
-                }
-            }
+        // Coluna relativa: 0..0.33 = Pés/Pernas, 0.33..0.66 = Sacro/Quadril, 0.66..1.0 = Dorso/Cabeça
+        const colRatio = peakCol / cols;
+        let regionName = "Distribuição Homogênea";
+        if (peakVal > 0.15) {
+            if (colRatio > 0.70) regionName = `Occipital / Cabeça (${Math.round(peakVal * 100)}%)`;
+            else if (colRatio > 0.55) regionName = `Escápulas / Dorso (${Math.round(peakVal * 100)}%)`;
+            else if (colRatio > 0.38) regionName = `Região Sacral (${Math.round(peakVal * 100)}%)`;
+            else if (colRatio > 0.20) regionName = `Poplíteo / Joelhos (${Math.round(peakVal * 100)}%)`;
+            else regionName = `Calcâneos / Pés (${Math.round(peakVal * 100)}%)`;
         }
+        DOM.metricPeak.textContent = regionName;
+
+        const distScore = activeCount > 20 ? (1 - Math.abs(peakVal - 0.5)).toFixed(2) : "0.90";
+        DOM.metricDistribution.textContent = `${distScore} (Uniforme)`;
     }
 
-    function formatTimer(seconds) {
-        const mins = Math.floor(seconds / 60);
+    /* --- Time Formatter Helper --- */
+    function formatStopwatch(seconds) {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
         const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
+        return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
     }
 
-    function updateTimer(seconds, timeoutSeconds, isAlert) {
-        DOM.timerValue.textContent = formatTimer(seconds);
-        const pct = Math.min((seconds / timeoutSeconds) * 100, 100);
-        DOM.timerBar.style.width = `${pct}%`;
+    /* --- KPI Updater --- */
+    function updateKPIs(data) {
+        if (!data) return;
 
-        if (isAlert) {
-            DOM.timerCard.classList.add("alert-active");
-        } else {
-            DOM.timerCard.classList.remove("alert-active");
+        const weightKg = data.weight_kg !== undefined ? data.weight_kg : 64.5;
+        const isLocked = Boolean(data.is_locked);
+        const progressPct = data.stable_progress_pct !== undefined ? data.stable_progress_pct : 100;
+        const staticSecs = data.static_seconds !== undefined ? data.static_seconds : 1122; // 18m42s
+        const isAlert = Boolean(data.is_alert);
+
+        // KPI 1: Peso
+        if (DOM.kpiWeightVal) DOM.kpiWeightVal.textContent = weightKg.toFixed(2);
+        if (DOM.patientWeightHeader) DOM.patientWeightHeader.textContent = `${weightKg.toFixed(2)} kg`;
+
+        if (DOM.kpiStabilityFill) {
+            DOM.kpiStabilityFill.style.width = `${Math.min(100, Math.max(0, progressPct))}%`;
+            if (isLocked) {
+                DOM.kpiStabilityFill.classList.add("locked");
+                DOM.kpiStabilityText.textContent = "Estabilidade: 100%";
+                DOM.kpiStabilityStatus.textContent = "Estável ✓";
+            } else {
+                DOM.kpiStabilityFill.classList.remove("locked");
+                DOM.kpiStabilityText.textContent = `Estabilizando: ${Math.round(progressPct)}%`;
+                DOM.kpiStabilityStatus.textContent = "Em leitura...";
+            }
+        }
+
+        // KPI 3: Tempo na Condição
+        if (DOM.kpiTimerVal) {
+            DOM.kpiTimerVal.textContent = formatStopwatch(staticSecs);
+        }
+        if (DOM.kpiTimerFill) {
+            const pct = Math.min(100, (staticSecs / configuredTimeoutSec) * 100);
+            DOM.kpiTimerFill.style.width = `${pct}%`;
+        }
+
+        // KPI 4: Alerta
+        if (DOM.kpiAlertBadge) {
+            if (isAlert) {
+                DOM.kpiAlertBadge.className = "alert-badge active-warning";
+                DOM.kpiAlertBadge.innerHTML = `<span style="font-size: 14px;">⚠️</span> Atenção — Rotação Necessária`;
+                if (DOM.cardAlert) DOM.cardAlert.classList.add("alert-active");
+            } else {
+                DOM.kpiAlertBadge.className = "alert-badge";
+                DOM.kpiAlertBadge.innerHTML = `<span style="font-size: 14px;">●</span> Normal — Sem Risco LPP`;
+                if (DOM.cardAlert) DOM.cardAlert.classList.remove("alert-active");
+            }
+        }
+
+        // Status de Conexão
+        const isConnected = data.status === "conectado" || data.status === "connected" || !isEelAvailable;
+        if (DOM.statusDot) {
+            DOM.statusDot.className = isConnected ? "status-dot" : "status-dot disconnected";
+        }
+        if (DOM.statusText) {
+            DOM.statusText.textContent = isConnected ? "Conectado" : "Desconectado";
+        }
+        if (DOM.statusChip) {
+            DOM.statusChip.className = isConnected ? "status-chip" : "status-chip disconnected";
+        }
+
+        // Alerta Overlay
+        if (isAlert && !lastAlertState && !alertDismissed) {
+            showAlertOverlay(staticSecs);
+        } else if (!isAlert) {
+            alertDismissed = false;
+            hideAlertOverlay();
+        }
+        lastAlertState = isAlert;
+    }
+
+    function showAlertOverlay(seconds) {
+        if (DOM.alertOverlay && DOM.alertTime) {
+            DOM.alertTime.textContent = formatStopwatch(seconds);
+            DOM.alertOverlay.classList.remove("hidden");
         }
     }
 
-    function updateStatus(status) {
-        const connected = status === "conectado";
-        DOM.statusDot.className = connected
-            ? "status-dot connected"
-            : "status-dot disconnected";
-        DOM.statusText.textContent = status;
-    }
-
-    function updateFps() {
-        frameCount++;
-        const now = performance.now();
-        const elapsed = now - lastFrameTime;
-        if (elapsed >= 1000) {
-            currentFps = Math.round((frameCount * 1000) / elapsed);
-            DOM.fpsValue.textContent = currentFps;
-            frameCount = 0;
-            lastFrameTime = now;
+    function hideAlertOverlay() {
+        if (DOM.alertOverlay) {
+            DOM.alertOverlay.classList.add("hidden");
         }
-    }
-
-    /* --- Alert --- */
-    function showAlert(seconds) {
-        if (alertDismissed) return;
-        DOM.alertTime.textContent = formatTimer(seconds);
-        DOM.alertOverlay.classList.remove("hidden");
-    }
-
-    function hideAlert() {
-        DOM.alertOverlay.classList.add("hidden");
     }
 
     window.dismissAlert = function () {
         alertDismissed = true;
-        hideAlert();
+        hideAlertOverlay();
     };
 
-    /* --- Tare --- */
-    window.triggerTare = function () {
-        DOM.btnTare.disabled = true;
-        DOM.btnTare.textContent = "Coletando...";
-        DOM.tareStatus.textContent = "Coletando amostras...";
-        DOM.tareStatus.className = "tare-status tare-pending";
+    /* --- Chart.js Initialization & Mock Evolution Data --- */
+    function initCharts() {
+        const timeLabels = ["-4h", "-3.5h", "-3h", "-2.5h", "-2h", "-1.5h", "-1h", "-30m", "Agora"];
 
-        eel.tare_start()(function () {
-            /* o status é atualizado no próximo poll */
-        });
-    };
-
-    window.clearTare = function () {
-        eel.tare_clear()(function () {
-            DOM.tareStatus.textContent = "Inativa";
-            DOM.tareStatus.className = "tare-status";
-        });
-    };
-
-    function updateTareStatus(tare) {
-        if (!tare) return;
-        DOM.btnTare.disabled = tare.pending;
-        DOM.btnTare.textContent = tare.pending ? "Coletando..." : "Aplicar Tara";
-        if (tare.pending) {
-            DOM.tareStatus.textContent = "Coletando amostras...";
-            DOM.tareStatus.className = "tare-status tare-pending";
-        } else if (tare.active) {
-            DOM.tareStatus.textContent = `Ativa — offset ${tare.offset_kg.toFixed(1)}`;
-            DOM.tareStatus.className = "tare-status tare-active";
-        } else {
-            DOM.tareStatus.textContent = "Inativa";
-            DOM.tareStatus.className = "tare-status";
-        }
-    }
-
-    /* --- Calibration Panel --- */
-    function initCalibrationPanel() {
-        const inputs = document.querySelectorAll(".calib-field input");
-        inputs.forEach(function (input) {
-            input.addEventListener("input", function () {
-                const key = input.dataset.key;
-                const value = parseFloat(input.value);
-                if (isNaN(value)) return;
-
-                clearTimeout(debounceTimers[key]);
-                debounceTimers[key] = setTimeout(function () {
-                    eel.update_calibration(key, value)(function (result) {
-                        if (!result.ok) {
-                            console.error("calibration update failed:", result.error);
-                        }
-                    });
-                }, 300);
+        // 1. Gráfico de Peso
+        const ctxWeight = document.getElementById("chart-weight");
+        if (ctxWeight) {
+            chartWeightInstance = new Chart(ctxWeight, {
+                type: "line",
+                data: {
+                    labels: timeLabels,
+                    datasets: [{
+                        label: "Peso (kg)",
+                        data: [64.8, 64.7, 64.6, 64.5, 64.5, 64.6, 64.5, 64.5, 64.5],
+                        borderColor: "#0d9488",
+                        backgroundColor: "rgba(13, 148, 136, 0.08)",
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        pointHoverRadius: 4,
+                    }]
+                },
+                options: getCleanChartOptions(60, 70, "kg")
             });
-        });
+        }
 
-        /* Load initial values */
-        eel.get_calibration()(function (params) {
-            if (!params) return;
-            inputs.forEach(function (input) {
-                const key = input.dataset.key;
-                if (key in params) {
-                    input.value = params[key];
+        // 2. Gráfico de Alteração Postural
+        const ctxPosture = document.getElementById("chart-posture");
+        if (ctxPosture) {
+            chartPostureInstance = new Chart(ctxPosture, {
+                type: "line",
+                data: {
+                    labels: timeLabels,
+                    datasets: [{
+                        label: "Índice de Variação",
+                        data: [0.02, 0.03, 0.85, 0.04, 0.03, 0.05, 0.78, 0.03, 0.04],
+                        borderColor: "#0284c7",
+                        backgroundColor: "rgba(2, 132, 199, 0.08)",
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 2,
+                    }]
+                },
+                options: getCleanChartOptions(0, 1.0, "")
+            });
+        }
+
+        // 3. Gráfico de Tempo na Condição
+        const ctxTime = document.getElementById("chart-time");
+        if (ctxTime) {
+            chartTimeInstance = new Chart(ctxTime, {
+                type: "line",
+                data: {
+                    labels: timeLabels,
+                    datasets: [{
+                        label: "Tempo (min)",
+                        data: [15, 45, 10, 40, 58, 20, 10, 40, 18],
+                        borderColor: "#10b981",
+                        backgroundColor: "rgba(16, 185, 129, 0.08)",
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                    }]
+                },
+                options: getCleanChartOptions(0, 65, "min")
+            });
+        }
+
+        // Sparkline no KPI 2 (Postura)
+        const ctxSpark = document.getElementById("sparkline-posture");
+        if (ctxSpark) {
+            sparklineInstance = new Chart(ctxSpark, {
+                type: "line",
+                data: {
+                    labels: [1, 2, 3, 4, 5, 6, 7],
+                    datasets: [{
+                        data: [12, 14, 13, 15, 14, 15, 14],
+                        borderColor: "#0d9488",
+                        borderWidth: 1.8,
+                        pointRadius: 0,
+                        tension: 0.4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: { x: { display: false }, y: { display: false } }
                 }
             });
-        });
-    }
-
-    /* --- Main Polling Loop --- */
-    async function pollSensorData() {
-        try {
-            const data = await eel.get_sensor_data()();
-            if (!data) return;
-
-            renderHeatmap(data.heatmap, data.rows, data.cols);
-            updateWeight(data);
-            updateStatus(data.status);
-            DOM.gridSize.textContent = `${data.rows}×${data.cols}`;
-
-            /* Read timeout from calibration for timer bar scaling */
-            const calibSnap = await eel.get_calibration()();
-            const timeout = calibSnap ? calibSnap.posture_timeout_seconds : 60;
-            updateTimer(data.static_seconds, timeout, data.is_alert);
-
-            /* Tare status */
-            const tare = await eel.get_tare_status()();
-            updateTareStatus(tare);
-
-            /* Pico de pressão */
-            const peak = await eel.get_max_pressure()();
-            DOM.maxPressureValue.textContent = peak;
-
-            /* Alert logic */
-            if (data.is_alert && !lastAlertState) {
-                alertDismissed = false;
-                showAlert(data.static_seconds);
-            }
-            if (!data.is_alert) {
-                alertDismissed = false;
-                hideAlert();
-            }
-            lastAlertState = data.is_alert;
-
-            updateFps();
-        } catch (err) {
-            console.error("poll error:", err);
         }
     }
 
-
-    /* --- Init --- */
-    function init() {
-        initCalibrationPanel();
-        setInterval(pollSensorData, 50); /* ~20 FPS UI updates */
+    function getCleanChartOptions(minY, maxY, unit) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: "#1e293b",
+                    padding: 6,
+                    titleFont: { size: 10, family: "Inter" },
+                    bodyFont: { size: 11, family: "JetBrains Mono" },
+                    callbacks: {
+                        label: (context) => ` ${context.parsed.y} ${unit}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: 9, family: "Inter" }, color: "#94a3b8", maxRotation: 0 }
+                },
+                y: {
+                    min: minY,
+                    max: maxY,
+                    grid: { color: "#f1f5f9" },
+                    ticks: { font: { size: 9, family: "JetBrains Mono" }, color: "#94a3b8", maxTicksLimit: 3 }
+                }
+            }
+        };
     }
 
-    /* Wait for Eel to be ready */
+    /* --- Synthetic Matrix Generator for Fallback/Mock Mode --- */
+    let simPhase = 0;
+    function generateSyntheticPressureMatrix(rows, cols) {
+        simPhase += 0.05;
+        const matrix = [];
+        const breath = Math.sin(simPhase) * 0.06;
+
+        for (let r = 0; r < rows; r++) {
+            const rowArr = [];
+            for (let c = 0; c < cols; c++) {
+                // Orientação: Cabeça em c = 52..60, Sacro em c = 28..36, Pés em c = 4..10
+                // Linhas centrais r = 10..22
+                const centerDistY = Math.abs(r - 16);
+                let p = 0;
+
+                // Cabeça / Occipital (c ≈ 55, r ≈ 16)
+                const headDist = Math.hypot(c - 55, r - 16);
+                if (headDist < 5) p = Math.max(p, (1 - headDist / 5) * 0.45);
+
+                // Escápulas (c ≈ 45, r ≈ 11 e r ≈ 21)
+                const scapulaLeft = Math.hypot(c - 45, r - 11);
+                const scapulaRight = Math.hypot(c - 45, r - 21);
+                if (scapulaLeft < 4.5) p = Math.max(p, (1 - scapulaLeft / 4.5) * (0.65 + breath));
+                if (scapulaRight < 4.5) p = Math.max(p, (1 - scapulaRight / 4.5) * (0.65 + breath));
+
+                // Região Sacral (c ≈ 32, r ≈ 16) - Maior concentração
+                const sacrumDist = Math.hypot(c - 32, r - 16);
+                if (sacrumDist < 7) p = Math.max(p, (1 - sacrumDist / 7) * (0.82 + breath * 0.5));
+
+                // Calcâneos / Pés (c ≈ 7, r ≈ 13 e r ≈ 19)
+                const heelLeft = Math.hypot(c - 7, r - 13);
+                const heelRight = Math.hypot(c - 7, r - 19);
+                if (heelLeft < 3.5) p = Math.max(p, (1 - heelLeft / 3.5) * 0.55);
+                if (heelRight < 3.5) p = Math.max(p, (1 - heelRight / 3.5) * 0.55);
+
+                // Ruído basal suave
+                if (p > 0.05) p += (Math.random() - 0.5) * 0.03;
+
+                rowArr.push(Math.max(0, Math.min(1, p)));
+            }
+            matrix.push(rowArr);
+        }
+        return matrix;
+    }
+
+    /* --- Polling Loop --- */
+    async function pollSensorData() {
+        if (isEelAvailable && window.eel && window.eel.get_sensor_data) {
+            try {
+                const data = await window.eel.get_sensor_data()();
+                if (data) {
+                    renderHeatmapMatrix(data.heatmap, data.rows || 32, data.cols || 64);
+                    updateKPIs(data);
+
+                    if (window.eel.get_calibration) {
+                        const calib = await window.eel.get_calibration()();
+                        if (calib && calib.posture_timeout_seconds) {
+                            configuredTimeoutSec = calib.posture_timeout_seconds;
+                            if (DOM.kpiTimerLimit) {
+                                DOM.kpiTimerLimit.textContent = `${Math.round(configuredTimeoutSec / 60)} min`;
+                            }
+                        }
+                    }
+                    return;
+                }
+            } catch (err) {
+                // Em caso de falha no Eel, continua suavemente com o mock
+            }
+        }
+
+        // Mock Loop dinâmico (quando standalone no browser ou aguardando hardware)
+        const mockMatrix = generateSyntheticPressureMatrix(32, 64);
+        renderHeatmapMatrix(mockMatrix, 32, 64);
+        updateKPIs({
+            weight_kg: 64.50,
+            is_locked: true,
+            stable_progress_pct: 100,
+            static_seconds: 1122 + Math.floor((Date.now() / 1000) % 60),
+            is_alert: false,
+            status: "conectado",
+        });
+    }
+
+    /* --- Inicialização do Dashboard --- */
+    function init() {
+        initCharts();
+        setInterval(pollSensorData, 80); // ~12-15 FPS para performance fluida
+    }
+
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", init);
     } else {

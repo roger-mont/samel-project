@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 450" fill="none" class="body-silhouette-svg">
+  <defs>
+    <linearGradient id="bodyOutlineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#0d9488" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.35"/>
+    </linearGradient>
+    <pattern id="gridPattern" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(13, 148, 136, 0.05)" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- Background grid alignment -->
+  <rect width="1000" height="450" fill="url(#gridPattern)" rx="16" />
+
+  <!-- Reference boundary lines for hospital bed -->
+  <rect x="20" y="20" width="960" height="410" rx="14" stroke="rgba(148, 163, 184, 0.25)" stroke-width="1.5" stroke-dasharray="6 4" />
+
+  <!-- Zone indicators: Pés (Esq) -> Quadril/Sacro (Centro) -> Cabeça (Dir) -->
+  <g class="zone-labels" opacity="0.75" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#475569">
+    <text x="60" y="45" text-anchor="start">◀ PÉS &amp; CALCANHARES</text>
+    <text x="310" y="45" text-anchor="middle">PERNAS &amp; JOELHOS</text>
+    <text x="500" y="45" text-anchor="middle">QUADRIL &amp; SACRO</text>
+    <text x="730" y="45" text-anchor="middle">ESCÁPULAS &amp; DORSO</text>
+    <text x="940" y="45" text-anchor="end">CABEÇA ▶</text>
+  </g>
+
+  <!-- Anatomical Body Contour (Head at RIGHT, Feet at LEFT) -->
+  <g class="body-contour" stroke="url(#bodyOutlineGrad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="rgba(255, 255, 255, 0.04)">
+    <path d="
+      M 940 225 
+      C 940 185, 905 160, 855 160 
+      C 820 160, 805 180, 785 180
+      C 770 180, 760 145, 725 140
+      C 690 135, 680 165, 640 165
+      C 590 165, 570 155, 520 155
+      C 470 155, 450 170, 400 170
+      C 350 170, 320 180, 260 180
+      C 200 180, 150 185, 95 185
+      C 70 185, 55 195, 55 210
+      C 55 220, 75 225, 110 225
+      C 180 225, 220 220, 270 220
+      C 310 220, 330 225, 330 225
+      C 330 225, 310 230, 270 230
+      C 220 230, 180 225, 110 225
+      C 75 225, 55 230, 55 240
+      C 55 255, 70 265, 95 265
+      C 150 265, 200 270, 260 270
+      C 320 270, 350 280, 400 280
+      C 450 280, 470 295, 520 295
+      C 570 295, 590 285, 640 285
+      C 680 285, 690 315, 725 310
+      C 760 305, 770 270, 785 270
+      C 805 270, 820 290, 855 290
+      C 905 290, 940 265, 940 225
+      Z
+    " />
+
+    <!-- Head & Pillow detail (Right side) -->
+    <ellipse cx="865" cy="225" rx="55" ry="48" stroke="rgba(13, 148, 136, 0.45)" stroke-width="1.8" stroke-dasharray="4 3" />
+    <path d="M 915 225 C 915 200, 895 185, 865 185 C 835 185, 815 200, 815 225 C 815 250, 835 265, 865 265 C 895 265, 915 250, 915 225 Z" fill="rgba(13, 148, 136, 0.04)" />
+
+    <!-- Shoulders & Scapulae region -->
+    <path d="M 740 170 C 760 180, 760 270, 740 280" stroke="rgba(148, 163, 184, 0.4)" stroke-width="1.5" />
+    <ellipse cx="715" cy="185" rx="25" ry="16" stroke="rgba(148, 163, 184, 0.3)" stroke-width="1" stroke-dasharray="3 3" />
+    <ellipse cx="715" cy="265" rx="25" ry="16" stroke="rgba(148, 163, 184, 0.3)" stroke-width="1" stroke-dasharray="3 3" />
+
+    <!-- Spine axis -->
+    <line x1="120" y1="225" x2="810" y2="225" stroke="rgba(13, 148, 136, 0.25)" stroke-width="1.2" stroke-dasharray="6 4" />
+
+    <!-- Sacral & Pelvic region (Center) -->
+    <ellipse cx="500" cy="225" rx="42" ry="48" stroke="rgba(2, 132, 199, 0.4)" stroke-width="1.5" stroke-dasharray="4 3" fill="rgba(2, 132, 199, 0.03)" />
+    
+    <!-- Heels / Feet (Left side) -->
+    <ellipse cx="85" cy="205" rx="20" ry="12" stroke="rgba(148, 163, 184, 0.35)" stroke-width="1.2" />
+    <ellipse cx="85" cy="245" rx="20" ry="12" stroke="rgba(148, 163, 184, 0.35)" stroke-width="1.2" />
+  </g>
+
+  <!-- Crosshair target markers on key clinical pressure zones -->
+  <g class="clinical-targets" stroke="#0d9488" stroke-width="1.2" opacity="0.7">
+    <circle cx="865" cy="225" r="4" fill="#0d9488" />
+    <circle cx="715" cy="185" r="3" fill="none" />
+    <circle cx="715" cy="265" r="3" fill="none" />
+    <circle cx="500" cy="225" r="5" fill="#0284c7" />
+    <circle cx="85" cy="205" r="3" fill="none" />
+    <circle cx="85" cy="245" r="3" fill="none" />
+  </g>
+</svg>
