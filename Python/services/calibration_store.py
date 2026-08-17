@@ -81,15 +81,21 @@ class _BlockCalib:
 
 
 class CalibData:
-    """Dados de calibração para todos os blocos disponíveis.
+    """Dados de calibração para todos os blocos disponíveis e correção Modelo C.
 
     Atributos públicos:
-        is_valid  — True se pelo menos 1 bloco foi calibrado
-        blocks    — dict[block_id_int → _BlockCalib]
+        is_valid      — True se pelo menos 1 bloco foi calibrado
+        blocks        — dict[block_id_int → _BlockCalib]
+        correction_c  — tuple[a, b] ou None se Modelo C não estiver ativo
     """
 
-    def __init__(self, blocks: dict[int, _BlockCalib]) -> None:
+    def __init__(
+        self,
+        blocks: dict[int, _BlockCalib],
+        correction_c: tuple[float, float] | None = None,
+    ) -> None:
         self.blocks = blocks
+        self.correction_c = correction_c
         self.is_valid = len(blocks) > 0
         self._fallback: _BlockCalib | None = self._best_fallback()
 
@@ -139,6 +145,7 @@ class CalibData:
     def null(cls) -> "CalibData":
         obj = object.__new__(cls)
         obj.blocks = {}
+        obj.correction_c = None
         obj.is_valid = False
         obj._fallback = None
         return obj
@@ -223,11 +230,18 @@ def load_calibration(path: str | Path) -> CalibData:
         logger.error("erro ao interpretar calibration.json: %s", err)
         return CalibData.null()
 
-    calib = CalibData(blocks)
+    correction_c: tuple[float, float] | None = None
+    if "correction_model_c" in raw:
+        c_data = raw["correction_model_c"]
+        if "a" in c_data and "b" in c_data:
+            correction_c = (float(c_data["a"]), float(c_data["b"]))
+
+    calib = CalibData(blocks, correction_c=correction_c)
     logger.info(
-        "calibracao carregada (v%s): %d bloco(s) — IDs %s",
+        "calibracao carregada (v%s): %d bloco(s) — IDs %s — Modelo C: %s",
         version,
         len(blocks),
         sorted(blocks.keys()),
+        correction_c,
     )
     return calib

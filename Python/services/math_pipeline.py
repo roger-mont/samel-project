@@ -60,28 +60,43 @@ def compute_total_force(
     return float(np.sum(pressure_matrix))
 
 
+def apply_correction_c(m_fisica: float, calib: CalibData | None = None) -> float:
+    """Modelo C (Metodologia §17): Aplica correção linear global m̂ = max(0, a * m_fisica + b).
+
+    Se a massa física for <= 0.0 (sem carga), retorna 0.0 para não somar o offset b em vazio.
+    """
+    if m_fisica <= 0.0:
+        return 0.0
+    if calib is None or calib.correction_c is None:
+        return m_fisica
+    a, b = calib.correction_c
+    return max(0.0, a * m_fisica + b)
+
+
 def compute_total_mass(
     pressure_matrix: np.ndarray,
     calib: CalibData | None = None,
 ) -> float:
-    """Converte a matriz de pressão em massa (kg) = F_total / g.
+    """Converte a matriz de pressão em massa (kg) = F_total / g com correção Modelo C.
 
     Passo explícito: primeiro calcula força em Newton,
-    depois divide por gravidade (9.81 m/s²).
+    depois divide por gravidade (9.81 m/s²) e aplica correção linear se ativa.
     """
     force_n = compute_total_force(pressure_matrix, calib)
-    return force_n / GRAVITY_M_S2
+    m_fisica = force_n / GRAVITY_M_S2
+    return apply_correction_c(m_fisica, calib)
 
 
 def compute_model_a(
     pressure_matrix: np.ndarray,
     calib: CalibData | None = None,
 ) -> float:
-    """Modelo A (Metodologia §15): Soma direta de forças calibradas por bloco.
+    """Modelo A (Metodologia §15): Soma direta de forças calibradas por bloco (massa física).
 
     F_A = Σ_k F_k(soma_k)  →  m_A = F_A / g
     """
-    return compute_total_mass(pressure_matrix, calib)
+    force_n = compute_total_force(pressure_matrix, calib)
+    return force_n / GRAVITY_M_S2
 
 
 def _trapezoid_1d(y: np.ndarray, axis: int = -1) -> np.ndarray:

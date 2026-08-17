@@ -22,6 +22,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from config.settings import HID_VID, HID_PID, HID_PACKET_SIZE, HID_ROWS, HID_COLS
 from services.session_logger import CalibrationSessionLogger
+from services.calibration_store import load_calibration
+from services.math_pipeline import compute_model_a
+from scripts.fit_model_c import fit_model_c
 
 try:
     import hid
@@ -408,6 +411,172 @@ PREPARAÇÃO FÍSICA:
 
 
 # ---------------------------------------------------------------------------
+# Calibração Global da Maca Inteira (Modelo C / Adultos)
+# ---------------------------------------------------------------------------
+
+def _read_full_mat_mass(
+    device: hid.device,
+    calib_path: Path,
+    duration_s: float,
+) -> tuple[float, float, float]:
+    """Lê a matriz inteira 32x64 e calcula a massa física (kg) e variação."""
+    calib = load_calibration(calib_path)
+    matrix = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
+    mass_samples: list[float] = []
+    raw_sum_samples: list[float] = []
+    deadline = time.monotonic() + duration_s
+
+    while time.monotonic() < deadline:
+        t0 = time.monotonic()
+        try:
+            while True:
+                raw = device.read(HID_PACKET_SIZE)
+                if not raw:
+                    break
+                _parse_packet(bytes(raw), matrix)
+        except OSError:
+            break
+
+        mass_kg = compute_model_a(matrix, calib)
+        mass_samples.append(mass_kg)
+        raw_sum_samples.append(float(np.sum(matrix)))
+
+        rem = RENDER_INTERVAL - (time.monotonic() - t0)
+        if rem > 0:
+            time.sleep(rem)
+
+    if not mass_samples:
+        return 0.0, 0.0, 0.0
+
+    mean_mass = float(np.mean(mass_samples))
+    std_mass = float(np.std(mass_samples))
+    mean_raw_sum = float(np.mean(raw_sum_samples))
+    return mean_mass, std_mass, mean_raw_sum
+
+
+def _run_global_calibration(
+    device: hid.device,
+    session_logger: CalibrationSessionLogger,
+    output_path: Path,
+    sessions_dir: Path,
+) -> None:
+    session_id = session_logger.generate_session_id()
+    print(f"\n{'='*60}")
+    print("  CALIBRAÇÃO GLOBAL DA MACA INTEIRA — MODELO C (ADULTOS / CORPO INTEIRO)")
+    print(f"  Sessão ID: {session_id[:8]}...")
+    print(f"{'='*60}")
+    print("""
+PREPARAÇÃO FÍSICA:
+  - Maca com colchão, lençol e travesseiro posicionados normalmente.
+  - Certifique-se de que a maca está VAZIA para medir a TARA inicial.
+""")
+    input("  Pressione Enter quando a maca estiver VAZIA para medir TARA...")
+
+    print(f"  Medindo tara da maca ({SAMPLE_SECONDS}s)...", end="", flush=True)
+    tare_mass, tare_std, tare_raw = _read_full_mat_mass(device, output_path, SAMPLE_SECONDS)
+    print(f"  ✓  Massa residual inicial = {tare_mass:.2f} kg (sum bruto={tare_raw:.0f})\n")
+
+    weight_real_list: list[float] = []
+    weight_measured_list: list[float] = []
+
+    print("Comandos disponíveis no prompt de peso:")
+    print("  <número>  — registra um voluntário com peso conhecido na balança (ex: 72.5)")
+    print("  r         — remove o último voluntário registrado")
+    print("  l         — lista as medições atuais")
+    print("  Enter     — finaliza a coleta e ajusta o Modelo C global\n")
+
+    while True:
+        entrada = input("Peso real do voluntário (kg) / r / l / Enter p/ finalizar: ").strip().lower()
+
+        if entrada == "":
+            if len(weight_real_list) < 3:
+                print("  [AVISO] Mínimo 3 pessoas/pesos recomendados para ajustar a curva global.\n")
+                resp = input("  Deseja finalizar mesmo assim? (s/N): ").strip().lower()
+                if resp != "s":
+                    continue
+            break
+
+        if entrada == "l":
+            if not weight_real_list:
+                print("  (nenhum voluntário registrado ainda)\n")
+            else:
+                print(f"\n  {'#':<4} {'Real (kg)':>12} {'Medido Físico (kg)':>20} {'Diferença (kg)':>16}")
+                print("  " + "-" * 56)
+                for i, (r, m) in enumerate(zip(weight_real_list, weight_measured_list)):
+                    print(f"  {i:<4} {r:>12.2f} {m:>20.2f} {m - r:>+16.2f}")
+                print()
+            continue
+
+        if entrada == "r":
+            if not weight_real_list:
+                print("  Nenhum ponto para remover.\n")
+                continue
+            r_rem = weight_real_list.pop()
+            m_rem = weight_measured_list.pop()
+            print(f"  Ponto removido: {r_rem:.2f} kg real (medido={m_rem:.2f} kg)\n")
+            continue
+
+        try:
+            real_kg = float(entrada.replace(",", "."))
+            if real_kg <= 0.0:
+                print("  [ERRO] O peso deve ser maior que 0 kg.\n")
+                continue
+        except ValueError:
+            print("  Valor inválido. Digite um número (ex: 70.5), 'r', 'l' ou Enter.\n")
+            continue
+
+        input(f"\n  [AÇÃO] Voluntário de {real_kg:.2f} kg DEITADO na maca (parado). Pressione Enter para ler...")
+        print(f"  Coletando dados da maca inteira ({SAMPLE_SECONDS}s)...", end="", flush=True)
+        mean_mass, std_mass, mean_raw = _read_full_mat_mass(device, output_path, SAMPLE_SECONDS)
+        net_measured_kg = max(0.0, mean_mass - tare_mass)
+        cv = (std_mass / mean_mass * 100) if mean_mass > 0 else 0.0
+        estavel = cv < 8.0
+        simbolo = "✓" if estavel else "⚠"
+
+        print(f"  {simbolo}  medido={net_measured_kg:.2f} kg  std={std_mass:.2f}  variação={cv:.1f}%")
+
+        if not estavel:
+            print("  [AVISO] Medição instável (variação corporal > 8%). Voluntário pode ter se movido.")
+            resp = input("  Refazer esta medição? (s/N): ").strip().lower()
+            if resp == "s":
+                print()
+                continue
+
+        weight_real_list.append(real_kg)
+        weight_measured_list.append(net_measured_kg)
+        print(f"  Voluntário [{len(weight_real_list) - 1}] salvo: Real {real_kg:.2f} kg → Medido {net_measured_kg:.2f} kg")
+
+        # Registra no CSV global
+        csv_file = session_logger.log_calibration_point(
+            session_id=session_id,
+            block_id=0,  # 0 indica Maca Global
+            reference_kg=real_kg,
+            position_tag="full_body",
+            repetition=1,
+            raw_sum=mean_raw,
+            net_sum=max(0.0, mean_raw - tare_raw),
+            mean=mean_raw,
+            std=std_mass,
+            cv_pct=cv,
+            estimated_kg=round(net_measured_kg, 3),
+            stability_state="stable" if estavel else "transient",
+            time_since_load_s=float(SAMPLE_SECONDS),
+            tare_block_sum=tare_raw,
+        )
+        if csv_file:
+            print(f"  [CSV] Registrado em: {csv_file.name}")
+        print("  (use 'r' para desfazer se necessário)\n")
+
+    if len(weight_real_list) >= 2:
+        print("\n" + "="*60)
+        print("  AJUSTANDO MODELO C COM OS NOVOS DADOS DA MACA INTEIRA...")
+        print("="*60)
+        fit_model_c(sessions_dir=sessions_dir, output_json=output_path)
+    else:
+        print("\n[INFO] Menos de 2 voluntários coletados. Modelo C não foi reajustado.")
+
+
+# ---------------------------------------------------------------------------
 # CLI e Loop Principal
 # ---------------------------------------------------------------------------
 
@@ -455,23 +624,36 @@ def main() -> None:
             if blocos_prontos:
                 print(f"Blocos já calibrados no JSON: {', '.join(blocos_prontos)}\n")
 
-            print("Configuração da sessão:")
-            cur_block = _prompt_block_id(cur_block)
-            cur_pos = _prompt_position(cur_pos)
-            cur_rep = _prompt_repetition(cur_rep)
+            print("Escolha o modo de calibração:")
+            print("  [1] Calibrar Bloco Individual (1 a 8) — placa rígida + pesos menores")
+            print("  [2] Calibrar Maca Inteira (Modelo C)  — voluntários / adultos / corpo todo")
+            modo = input("Modo [1/2, Enter = 1]: ").strip()
 
-            _run_single_calibration(
-                device=device,
-                block_id=cur_block,
-                position_tag=cur_pos,
-                repetition=cur_rep,
-                session_logger=session_logger,
-                output_path=output_path,
-            )
+            if modo == "2":
+                _run_global_calibration(
+                    device=device,
+                    session_logger=session_logger,
+                    output_path=output_path,
+                    sessions_dir=Path(args.sessions_dir),
+                )
+            else:
+                print("\nConfiguração da sessão de bloco:")
+                cur_block = _prompt_block_id(cur_block)
+                cur_pos = _prompt_position(cur_pos)
+                cur_rep = _prompt_repetition(cur_rep)
+
+                _run_single_calibration(
+                    device=device,
+                    block_id=cur_block,
+                    position_tag=cur_pos,
+                    repetition=cur_rep,
+                    session_logger=session_logger,
+                    output_path=output_path,
+                )
 
             print("\nO que deseja fazer a seguir?")
-            print(f"  [1] Nova repetição (mesmo bloco {cur_block}, mesma posição '{cur_pos}')")
-            print("  [2] Configurar novo ensaio (mudar bloco / posição / repetição)")
+            print(f"  [1] Nova repetição do bloco {cur_block}")
+            print("  [2] Configurar novo ensaio / trocar modo")
             print("  [3] Finalizar e sair")
             escolha = input("Escolha [1/2/3, Enter = 3]: ").strip()
 
