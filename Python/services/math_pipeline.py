@@ -48,10 +48,10 @@ def compute_total_force(
     pressure_matrix: np.ndarray,
     calib: CalibData | None = None,
 ) -> float:
-    """Converte a matriz de pressão em força total (Newton).
+    """Converte a matriz de pressão em contribuição total calibrada C_total.
 
-    Usa calibração por bloco. Se `calib` for None ou inválido,
-    retorna a soma bruta como fallback (sem unidade física).
+    Usa calibração multi-bloco. Se `calib` for None ou inválido,
+    retorna a soma bruta como fallback.
     """
     if calib is not None and calib.is_valid:
         return calib.matrix_to_newton(pressure_matrix)
@@ -61,10 +61,7 @@ def compute_total_force(
 
 
 def apply_correction_c(m_fisica: float, calib: CalibData | None = None) -> float:
-    """Modelo C (Metodologia §17): Aplica correção linear global m̂ = max(0, a * m_fisica + b).
-
-    Se a massa física for <= 0.0 (sem carga), retorna 0.0 para não somar o offset b em vazio.
-    """
+    """Modelo C (Metodologia §17): Aplica correção linear global m̂ = max(0, a * m_fisica + b)."""
     if m_fisica <= 0.0:
         return 0.0
     if calib is None or calib.correction_c is None:
@@ -77,14 +74,12 @@ def compute_total_mass(
     pressure_matrix: np.ndarray,
     calib: CalibData | None = None,
 ) -> float:
-    """Converte a matriz de pressão em massa (kg) = F_total / g com correção Modelo C.
+    """Converte matriz de pressão em massa estimada P̂ (kg) conforme modelo ativo."""
+    if calib is not None and calib.is_valid:
+        return calib.predict_mass(pressure_matrix)
 
-    Passo explícito: primeiro calcula força em Newton,
-    depois divide por gravidade (9.81 m/s²) e aplica correção linear se ativa.
-    """
     force_n = compute_total_force(pressure_matrix, calib)
-    m_fisica = force_n / GRAVITY_M_S2
-    return apply_correction_c(m_fisica, calib)
+    return force_n / GRAVITY_M_S2
 
 
 def compute_model_a(

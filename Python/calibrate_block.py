@@ -146,7 +146,16 @@ def _fit_curve(
     net = sums_raw - tare_sum
     forces_n = weights_kg * GRAVITY_M_S2
     degree = min(2, len(weights_kg) - 1)
-    coeffs = np.polyfit(net, forces_n, deg=degree).tolist()
+
+    if degree == 2:
+        A = np.column_stack([net ** 2, net])
+        fit_res, _, _, _ = np.linalg.lstsq(A, forces_n, rcond=None)
+        coeffs = [float(fit_res[0]), float(fit_res[1]), 0.0]
+    else:
+        A = net[:, np.newaxis]
+        fit_res, _, _, _ = np.linalg.lstsq(A, forces_n, rcond=None)
+        coeffs = [float(fit_res[0]), 0.0]
+
     predicted_n = np.polyval(coeffs, net)
     rmse_n = float(np.sqrt(np.mean((predicted_n - forces_n) ** 2)))
     rmse_kg = rmse_n / GRAVITY_M_S2
@@ -414,17 +423,20 @@ PREPARAÇÃO FÍSICA:
 # Calibração Global da Maca Inteira (Modelo C / Adultos)
 # ---------------------------------------------------------------------------
 
-def _read_full_mat_mass(
+def _read_full_mat_vector(
     device: hid.device,
     calib_path: Path,
     duration_s: float,
-) -> tuple[float, float, float]:
-    """Lê a matriz inteira 32x64 e calcula a massa física (kg) e variação."""
+) -> tuple[float, float, float, np.ndarray, np.ndarray]:
+    """Lê a matriz inteira 32x64 e retorna (massa_kg, std_massa, soma_bruta_total, medias_blocos, std_blocos)."""
     calib = load_calibration(calib_path)
     matrix = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
     mass_samples: list[float] = []
     raw_sum_samples: list[float] = []
-    deadline = time.monotonic() + duration_s
+    block_samples: list[list[float]] = [[] for _ in range(8)]
+    start_t = time.monotonic()
+    deadline = start_t + duration_s
+    last_print = start_t
 
     while time.monotonic() < deadline:
         t0 = time.monotonic()
@@ -441,17 +453,54 @@ def _read_full_mat_mass(
         mass_samples.append(mass_kg)
         raw_sum_samples.append(float(np.sum(matrix)))
 
+        for idx, bid in enumerate(sorted(BLOCK_REGIONS.keys())):
+            row_sl, col_sl = BLOCK_REGIONS[bid]
+            block_samples[idx].append(float(matrix[row_sl, col_sl].sum()))
+
+        # Atualiza contagem regressiva se duração for longa (>= 10s)
+        if duration_s >= 10 and (time.monotonic() - last_print) >= 1.0:
+            elapsed = time.monotonic() - start_t
+            remaining = max(0.0, duration_s - elapsed)
+            print(f"\r  [Tempo restante: {remaining:4.1f}s / {duration_s:.0f}s | Peso instantâneo: {mass_kg:5.2f} kg] ", end="", flush=True)
+            last_print = time.monotonic()
+
         rem = RENDER_INTERVAL - (time.monotonic() - t0)
         if rem > 0:
             time.sleep(rem)
 
-    if not mass_samples:
-        return 0.0, 0.0, 0.0
+    if duration_s >= 10:
+        print()
 
-    mean_mass = float(np.mean(mass_samples))
-    std_mass = float(np.std(mass_samples))
-    mean_raw_sum = float(np.mean(raw_sum_samples))
-    return mean_mass, std_mass, mean_raw_sum
+    if not mass_samples:
+        return 0.0, 0.0, 0.0, np.zeros(8), np.zeros(8)
+
+    # Se a amostragem durou mais de 10s, extrai a média dos últimos 5 segundos (regime permanente estável)
+    if duration_s >= 10:
+        tail_count = max(10, int(5.0 / RENDER_INTERVAL))
+        tail_mass = mass_samples[-tail_count:]
+        tail_raw = raw_sum_samples[-tail_count:]
+        tail_blocks = [b[-tail_count:] for b in block_samples]
+    else:
+        tail_mass = mass_samples
+        tail_raw = raw_sum_samples
+        tail_blocks = block_samples
+
+    mean_mass = float(np.mean(tail_mass))
+    std_mass = float(np.std(tail_mass))
+    mean_raw_sum = float(np.mean(tail_raw))
+    mean_blocks = np.array([np.mean(b) for b in tail_blocks])
+    std_blocks = np.array([np.std(b) for b in tail_blocks])
+    return mean_mass, std_mass, mean_raw_sum, mean_blocks, std_blocks
+
+
+def _read_full_mat_mass(
+    device: hid.device,
+    calib_path: Path,
+    duration_s: float,
+) -> tuple[float, float, float]:
+    """Alias para compatibilidade."""
+    m_mass, s_mass, m_raw, _, _ = _read_full_mat_vector(device, calib_path, duration_s)
+    return m_mass, s_mass, m_raw
 
 
 def _run_global_calibration(
@@ -459,38 +508,40 @@ def _run_global_calibration(
     session_logger: CalibrationSessionLogger,
     output_path: Path,
     sessions_dir: Path,
+    duration_s: float = 60.0,
 ) -> None:
     session_id = session_logger.generate_session_id()
     print(f"\n{'='*60}")
-    print("  CALIBRAÇÃO GLOBAL DA MACA INTEIRA — MODELO C (ADULTOS / CORPO INTEIRO)")
+    print(f"  CALIBRAÇÃO EXPERIMENTAL DA MACA COMPLETA (8 BLOCOS | {duration_s:.0f}s POR ENSAIO)")
     print(f"  Sessão ID: {session_id[:8]}...")
     print(f"{'='*60}")
     print("""
-PREPARAÇÃO FÍSICA:
-  - Maca com colchão, lençol e travesseiro posicionados normalmente.
+PREPARAÇÃO FÍSICA (Metodologia §8):
+  - Maca com colchão, eletrônica e periféricos estabilizados.
   - Certifique-se de que a maca está VAZIA para medir a TARA inicial.
 """)
-    input("  Pressione Enter quando a maca estiver VAZIA para medir TARA...")
+    input("  Pressione Enter quando a maca estiver VAZIA para medir TARA inicial...")
 
-    print(f"  Medindo tara da maca ({SAMPLE_SECONDS}s)...", end="", flush=True)
-    tare_mass, tare_std, tare_raw = _read_full_mat_mass(device, output_path, SAMPLE_SECONDS)
-    print(f"  ✓  Massa residual inicial = {tare_mass:.2f} kg (sum bruto={tare_raw:.0f})\n")
+    print(f"  Medindo tara da maca (5s)...", end="", flush=True)
+    tare_mass, tare_std, tare_raw, tare_blocks, _ = _read_full_mat_vector(device, output_path, 5.0)
+    print(f"  ✓  Massa residual = {tare_mass:.2f} kg | Somas dos 8 blocos na tara: {[round(b, 1) for b in tare_blocks]}\n")
 
     weight_real_list: list[float] = []
     weight_measured_list: list[float] = []
+    repetition = 1
 
     print("Comandos disponíveis no prompt de peso:")
-    print("  <número>  — registra um voluntário com peso conhecido na balança (ex: 72.5)")
-    print("  r         — remove o último voluntário registrado")
-    print("  l         — lista as medições atuais")
-    print("  Enter     — finaliza a coleta e ajusta o Modelo C global\n")
+    print("  <número>  — registra carga / voluntário conhecido (ex: 72.5)")
+    print("  r         — remove o último ponto registrado")
+    print("  l         — lista medições da sessão")
+    print("  Enter     — finaliza a coleta e ajusta/compara os modelos\n")
 
     while True:
-        entrada = input("Peso real do voluntário (kg) / r / l / Enter p/ finalizar: ").strip().lower()
+        entrada = input("Peso real aplicado (kg) / r / l / Enter p/ finalizar: ").strip().lower()
 
         if entrada == "":
             if len(weight_real_list) < 3:
-                print("  [AVISO] Mínimo 3 pessoas/pesos recomendados para ajustar a curva global.\n")
+                print("  [AVISO] Mínimo 3 pesos/repetições recomendados para ajuste confiável.\n")
                 resp = input("  Deseja finalizar mesmo assim? (s/N): ").strip().lower()
                 if resp != "s":
                     continue
@@ -498,12 +549,12 @@ PREPARAÇÃO FÍSICA:
 
         if entrada == "l":
             if not weight_real_list:
-                print("  (nenhum voluntário registrado ainda)\n")
+                print("  (nenhum ensaio registrado ainda)\n")
             else:
-                print(f"\n  {'#':<4} {'Real (kg)':>12} {'Medido Físico (kg)':>20} {'Diferença (kg)':>16}")
-                print("  " + "-" * 56)
+                print(f"\n  {'#':<4} {'Real (kg)':>12} {'Medido (kg)':>16} {'Diferença (kg)':>16}")
+                print("  " + "-" * 52)
                 for i, (r, m) in enumerate(zip(weight_real_list, weight_measured_list)):
-                    print(f"  {i:<4} {r:>12.2f} {m:>20.2f} {m - r:>+16.2f}")
+                    print(f"  {i:<4} {r:>12.2f} {m:>16.2f} {m - r:>+16.2f}")
                 print()
             continue
 
@@ -525,15 +576,19 @@ PREPARAÇÃO FÍSICA:
             print("  Valor inválido. Digite um número (ex: 70.5), 'r', 'l' ou Enter.\n")
             continue
 
-        input(f"\n  [AÇÃO] Voluntário de {real_kg:.2f} kg DEITADO na maca (parado). Pressione Enter para ler...")
-        print(f"  Coletando dados da maca inteira ({SAMPLE_SECONDS}s)...", end="", flush=True)
-        mean_mass, std_mass, mean_raw = _read_full_mat_mass(device, output_path, SAMPLE_SECONDS)
+        pos_escolhida = _prompt_position(default="center")
+
+        input(f"\n  [AÇÃO] Carga de {real_kg:.2f} kg aplicada na posição '{pos_escolhida}'. Pressione Enter para iniciar acomodação ({duration_s:.0f}s)...")
+        mean_mass, std_mass, mean_raw, mean_blocks, std_blocks = _read_full_mat_vector(device, output_path, duration_s)
         net_measured_kg = max(0.0, mean_mass - tare_mass)
         cv = (std_mass / mean_mass * 100) if mean_mass > 0 else 0.0
-        estavel = cv < 8.0
+        # Para massas pequenas, oscilação de 100-200g gera CV% alto por divisão por valor pequeno.
+        # Critério: CV < 8% OU desvio padrão absoluto < 0.25 kg.
+        estavel = (cv < 8.0) or (std_mass < 0.25)
         simbolo = "✓" if estavel else "⚠"
 
-        print(f"  {simbolo}  medido={net_measured_kg:.2f} kg  std={std_mass:.2f}  variação={cv:.1f}%")
+        net_blocks = np.maximum(0.0, mean_blocks - tare_blocks)
+        print(f"  {simbolo}  medido={net_measured_kg:.2f} kg  std={std_mass:.2f}kg  cv={cv:.1f}%  Somas líquidas B1-B8={[round(b, 1) for b in net_blocks]}")
 
         if not estavel:
             print("  [AVISO] Medição instável (variação corporal > 8%). Voluntário pode ter se movido.")
@@ -544,15 +599,15 @@ PREPARAÇÃO FÍSICA:
 
         weight_real_list.append(real_kg)
         weight_measured_list.append(net_measured_kg)
-        print(f"  Voluntário [{len(weight_real_list) - 1}] salvo: Real {real_kg:.2f} kg → Medido {net_measured_kg:.2f} kg")
+        print(f"  Ensaio [{len(weight_real_list) - 1}] salvo: Real {real_kg:.2f} kg → Medido {net_measured_kg:.2f} kg")
 
-        # Registra no CSV global
-        csv_file = session_logger.log_calibration_point(
+        # 1. Registra no CSV por bloco legado para compatibilidade
+        session_logger.log_calibration_point(
             session_id=session_id,
-            block_id=0,  # 0 indica Maca Global
+            block_id=0,
             reference_kg=real_kg,
-            position_tag="full_body",
-            repetition=1,
+            position_tag=pos_escolhida,
+            repetition=repetition,
             raw_sum=mean_raw,
             net_sum=max(0.0, mean_raw - tare_raw),
             mean=mean_raw,
@@ -560,20 +615,33 @@ PREPARAÇÃO FÍSICA:
             cv_pct=cv,
             estimated_kg=round(net_measured_kg, 3),
             stability_state="stable" if estavel else "transient",
-            time_since_load_s=float(SAMPLE_SECONDS),
+            time_since_load_s=float(duration_s),
             tare_block_sum=tare_raw,
         )
-        if csv_file:
-            print(f"  [CSV] Registrado em: {csv_file.name}")
+
+        # 2. Registra no novo Formato Largo (Wide Format: B1...B8 simultâneos conforme §29)
+        wide_file = session_logger.log_wide_point(
+            session_id=session_id,
+            peso_real_kg=real_kg,
+            posicao=pos_escolhida,
+            repeticao=repetition,
+            block_sums=net_blocks,
+            tempo_s=float(duration_s),
+            estavel=1 if estavel else 0,
+            modelo_estimado=round(net_measured_kg, 3),
+        )
+        if wide_file:
+            print(f"  [CSV Wide] Registrado em: {wide_file.name}")
+        repetition += 1
         print("  (use 'r' para desfazer se necessário)\n")
 
     if len(weight_real_list) >= 2:
         print("\n" + "="*60)
-        print("  AJUSTANDO MODELO C COM OS NOVOS DADOS DA MACA INTEIRA...")
+        print("  AJUSTANDO E COMPARANDO MODELOS COM OS NOVOS DADOS DA MACA...")
         print("="*60)
         fit_model_c(sessions_dir=sessions_dir, output_json=output_path)
     else:
-        print("\n[INFO] Menos de 2 voluntários coletados. Modelo C não foi reajustado.")
+        print("\n[INFO] Menos de 2 ensaios coletados. Modelos não foram reajustados.")
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +656,8 @@ def parse_args() -> argparse.Namespace:
                    help="Posição inicial sugerida (padrão: center)")
     p.add_argument("--repetition", type=int, default=1,
                    help="Repetição inicial sugerida (padrão: 1)")
+    p.add_argument("--duration", type=float, default=60.0,
+                   help="Tempo de acomodação/leitura por ensaio em segundos (padrão: 60s)")
     p.add_argument("--output", type=str, default="calibration.json",
                    help="Arquivo de saída (padrão: calibration.json)")
     p.add_argument("--sessions-dir", type=str, default="sessions",
@@ -635,6 +705,7 @@ def main() -> None:
                     session_logger=session_logger,
                     output_path=output_path,
                     sessions_dir=Path(args.sessions_dir),
+                    duration_s=args.duration,
                 )
             else:
                 print("\nConfiguração da sessão de bloco:")

@@ -1,5 +1,0 @@
-timestamp_iso,session_id,software_version,block_id,reference_kg,reference_n,position_tag,repetition,raw_sum_block,net_sum_block,mean_raw_block,std_raw_block,cv_pct,estimated_kg,estimated_n,stability_state,time_since_load_s,tare_block_sum
-2026-08-17T11:29:35.551794-04:00,ee9281aa-0793-45a4-8a98-1209334e22ab,1.0.0,5,0.0,0.0,center,1,95.4541,0.0,95.4541,7.0857,7.4231,,,stable,5.0,95.4541
-2026-08-17T11:30:18.437967-04:00,ee9281aa-0793-45a4-8a98-1209334e22ab,1.0.0,5,1.957,19.1982,center,1,438.1173,342.6633,438.1173,15.0567,3.4367,,,stable,5.0,95.4541
-2026-08-17T11:31:02.002401-04:00,ee9281aa-0793-45a4-8a98-1209334e22ab,1.0.0,5,3.897,38.2296,center,1,1133.8061,1038.352,1133.8061,25.8458,2.2796,,,stable,5.0,95.4541
-2026-08-17T11:35:38.023373-04:00,ee9281aa-0793-45a4-8a98-1209334e22ab,1.0.0,5,6.247,61.2831,center,1,3279.3622,3183.9082,3279.3622,76.1806,2.323,,,stable,5.0,95.4541

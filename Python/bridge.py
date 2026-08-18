@@ -13,6 +13,7 @@ from config.settings import (
     CalibrationParams, HID_ROWS, HID_COLS, TARE_SAMPLE_COUNT,
     STABILITY_EPSILON_KG, STABILITY_TMIN_S,
     STABILITY_VARIANCE_KG2, STABILITY_DRIFT_KG_S, STABILITY_WINDOW_SIZE,
+    WEIGHT_WINDOW_SECONDS, FAST_RESET_THRESHOLD_KG,
 )
 from services.serial_reader import BaseFrameReader
 from services.math_pipeline import compute_force_matrix, compute_total_mass, apply_ema
@@ -36,10 +37,11 @@ _tare_samples: list[float] = []
 _monitor_ref: PostureMonitor | None = None
 _reader_ref: BaseFrameReader | None = None
 
-# Weight lock — estabilidade (Metodologia §13)
+# Média Móvel Inteligente de 60 segundos
+_rolling_history: collections.deque[tuple[float, float]] = collections.deque()
 _weight_locked: bool = False
 _locked_weight_kg: float = 0.0
-_stable_consecutive_s: float = 0.0
+_stable_progress_pct: float = 0.0
 
 
 def start_reading_loop(
@@ -135,29 +137,32 @@ def _reading_loop(
             from services.math_pipeline import compute_total_force
             force_n = compute_total_force(force_matrix, calib)
 
-            # Weight lock — critério de estabilidade combinado
-            weight_history.append(net_mass)
-            frame_stable = _check_stability(weight_history, net_mass, previous_weight, dt_s)
-
-            if frame_stable and net_mass > 0.5:
-                _stable_consecutive_s += dt_s
-                if _stable_consecutive_s >= STABILITY_TMIN_S and not _weight_locked:
-                    _weight_locked = True
-                    _locked_weight_kg = net_mass
-                    logger.info("peso travado: %.2f kg (estável por %.1fs)", net_mass, _stable_consecutive_s)
-            else:
-                if _stable_consecutive_s > 0:
-                    _stable_consecutive_s = 0.0
-                if net_mass < 0.5:
-                    _weight_locked = False
-                    _locked_weight_kg = 0.0
-
-            # Detecção de mudança significativa → destrava
-            if _weight_locked and abs(net_mass - _locked_weight_kg) > STABILITY_EPSILON_KG * 3:
+            # Média Móvel Inteligente de 60 segundos com Reset Rápido
+            now = time.monotonic()
+            if net_mass < 0.5:
+                _rolling_history.clear()
+                displayed_weight = 0.0
                 _weight_locked = False
                 _locked_weight_kg = 0.0
-                _stable_consecutive_s = 0.0
-                logger.info("peso destravado: variacao significativa detectada")
+                _stable_progress_pct = 0.0
+            else:
+                if _rolling_history:
+                    curr_avg = sum(m for _, m in _rolling_history) / len(_rolling_history)
+                    if abs(net_mass - curr_avg) > FAST_RESET_THRESHOLD_KG:
+                        # Reset rápido se houver mudança brusca (degrau > 2 kg)
+                        _rolling_history.clear()
+                        logger.info("degrau detectado (>%.1f kg) — buffer de 60s reiniciado", FAST_RESET_THRESHOLD_KG)
+
+                _rolling_history.append((now, net_mass))
+                cutoff = now - WEIGHT_WINDOW_SECONDS
+                while _rolling_history and _rolling_history[0][0] < cutoff:
+                    _rolling_history.popleft()
+
+                displayed_weight = sum(m for _, m in _rolling_history) / len(_rolling_history)
+                window_span_s = _rolling_history[-1][0] - _rolling_history[0][0] if len(_rolling_history) > 1 else 0.0
+                _stable_progress_pct = min(100.0, (window_span_s / WEIGHT_WINDOW_SECONDS) * 100.0)
+                _weight_locked = _stable_progress_pct >= 95.0
+                _locked_weight_kg = displayed_weight
 
             monitor.update_tolerance(snap["posture_tolerance"])
             monitor.update_timeout(snap["posture_timeout_seconds"])
@@ -179,7 +184,7 @@ def _reading_loop(
                         _tare_samples = []
 
                 _current_heatmap = normalized.tolist()
-                _current_weight_kg = net_mass
+                _current_weight_kg = displayed_weight
                 _current_force_n = force_n
                 _static_seconds = monitor.elapsed_seconds
                 _is_alert = alert
@@ -200,7 +205,6 @@ def _reading_loop(
 def get_sensor_data() -> dict:
     """Retorna snapshot dos dados atuais para o frontend."""
     with _state_lock:
-        progress = min(100.0, _stable_consecutive_s / STABILITY_TMIN_S * 100) if STABILITY_TMIN_S > 0 else 0.0
         return {
             "heatmap": _current_heatmap,
             "weight_kg": round(_current_weight_kg, 2),
@@ -212,7 +216,7 @@ def get_sensor_data() -> dict:
             "status": _connection_status,
             "is_locked": _weight_locked,
             "locked_weight_kg": round(_locked_weight_kg, 2),
-            "stable_progress_pct": round(progress, 1),
+            "stable_progress_pct": round(_stable_progress_pct, 1),
         }
 
 
