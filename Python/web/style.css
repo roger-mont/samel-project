@@ -50,7 +50,6 @@
     --shadow-active: 0 0 0 3px rgba(13, 148, 136, 0.15);
 
     /* Dimensions & Radii */
-    --sidebar-width: 230px;
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 14px;
@@ -78,132 +77,12 @@ html, body {
     min-height: 100vh;
 }
 
-/* --- Sidebar --- */
-.sidebar {
-    width: var(--sidebar-width);
-    min-width: var(--sidebar-width);
-    background: var(--bg-surface);
-    border-right: 1px solid var(--border-light);
-    display: flex;
-    flex-direction: column;
-    z-index: 20;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.02);
-}
-
-.sidebar-brand {
-    padding: 24px 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    border-bottom: 1px solid var(--border-subtle);
-}
-
-.brand-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: var(--radius-md);
-    background: linear-gradient(135deg, var(--samel-teal), var(--samel-blue));
-    color: var(--text-inverse);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    font-weight: 800;
-    box-shadow: 0 4px 10px rgba(13, 148, 136, 0.25);
-}
-
-.brand-info {
-    display: flex;
-    flex-direction: column;
-}
-
-.brand-title {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text-main);
-    letter-spacing: -0.01em;
-}
-
-.brand-subtitle {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--samel-teal);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-
-.sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 18px 12px;
-    flex: 1;
-}
-
-.nav-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all var(--transition-fast);
-    cursor: pointer;
-}
-
-.nav-item svg {
-    width: 18px;
-    height: 18px;
-    stroke-width: 2;
-    color: var(--text-muted);
-    transition: color var(--transition-fast);
-}
-
-.nav-item:hover {
-    background: var(--bg-surface-subtle);
-    color: var(--samel-teal-dark);
-}
-
-.nav-item:hover svg {
-    color: var(--samel-teal);
-}
-
-.nav-item.active {
-    background: var(--bg-surface-active);
-    color: var(--samel-teal-dark);
-    font-weight: 600;
-}
-
-.nav-item.active svg {
-    color: var(--samel-teal);
-}
-
-.sidebar-footer {
-    padding: 16px 12px;
-    border-top: 1px solid var(--border-subtle);
-}
-
-.nav-logout {
-    color: var(--text-muted);
-}
-
-.nav-logout:hover {
-    background: var(--samel-red-light);
-    color: var(--samel-red);
-}
-
-.nav-logout:hover svg {
-    color: var(--samel-red);
-}
-
 /* --- Main Dashboard Area --- */
 .main-wrapper {
     flex: 1;
     display: flex;
     flex-direction: column;
+    width: 100%;
     min-width: 0;
     overflow-y: auto;
 }
@@ -233,16 +112,6 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-.top-bar-title span.badge-hospital {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 12px;
-    background: var(--samel-blue-light);
-    color: var(--samel-blue);
-    letter-spacing: 0.04em;
 }
 
 .top-bar-sub {
@@ -303,13 +172,13 @@ html, body {
 
 /* --- Dashboard Content Padding --- */
 .dashboard-content {
-    padding: 24px 28px 40px;
+    padding: 24px 32px 40px;
     display: flex;
     flex-direction: column;
     gap: 20px;
-    max-width: 1680px;
-    margin: 0 auto;
     width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
 }
 
 /* --- Patient Information Bar --- */
@@ -513,26 +382,33 @@ html, body {
 /* --- Central Section (Heatmap & Charts) --- */
 .central-grid {
     display: grid;
-    grid-template-columns: 1.15fr 0.85fr;
-    gap: 20px;
+    grid-template-columns: 1fr 48px;
+    gap: 16px;
+    transition: grid-template-columns 280ms cubic-bezier(0.4, 0, 0.2, 1);
+    align-items: stretch;
+}
+
+.central-grid.charts-expanded {
+    grid-template-columns: 60% calc(40% - 16px);
 }
 
 .panel-card {
     background: var(--bg-surface);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-xl);
-    padding: 22px;
+    padding: 20px 22px;
     box-shadow: var(--shadow-card);
     display: flex;
     flex-direction: column;
+    transition: all var(--transition-base);
 }
 
 .panel-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -558,6 +434,110 @@ html, body {
     color: var(--samel-teal-dark);
 }
 
+/* Charts Panel Collapse / Expand */
+.charts-panel {
+    position: relative;
+    overflow: hidden;
+}
+
+.charts-panel.collapsed {
+    padding: 12px 6px;
+    cursor: pointer;
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-light);
+    align-items: center;
+}
+
+.charts-panel.collapsed:hover {
+    background: var(--bg-surface-active);
+    border-color: var(--samel-teal);
+    box-shadow: var(--shadow-hover);
+}
+
+.charts-panel.collapsed .panel-header,
+.charts-panel.collapsed .charts-stack {
+    display: none;
+}
+
+.charts-panel:not(.collapsed) .collapsed-charts-strip {
+    display: none;
+}
+
+/* Collapsed Strip */
+.collapsed-charts-strip {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    user-select: none;
+    gap: 16px;
+}
+
+.collapsed-icon-box {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-light);
+    color: var(--samel-teal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.collapsed-label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.collapsed-expand-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--samel-teal);
+    color: var(--text-inverse);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(13, 148, 136, 0.3);
+    transition: transform var(--transition-fast);
+}
+
+.charts-panel.collapsed:hover .collapsed-expand-btn {
+    transform: scale(1.12);
+}
+
+/* Toggle Button in Expanded Header */
+.btn-toggle-charts {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-toggle-charts:hover {
+    background: var(--samel-teal-light);
+    color: var(--samel-teal-dark);
+    border-color: var(--samel-teal);
+}
+
 /* --- Heatmap Stage --- */
 .heatmap-stage-wrapper {
     position: relative;
@@ -565,7 +545,9 @@ html, body {
     display: flex;
     gap: 16px;
     align-items: stretch;
-    min-height: 330px;
+    height: 310px;
+    min-height: 310px;
+    max-height: 310px;
 }
 
 .heatmap-canvas-container {
@@ -639,10 +621,10 @@ html, body {
 /* Heatmap Metrics Footer */
 .heatmap-metrics-footer {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 1.25fr 1fr 1fr;
     gap: 12px;
-    margin-top: 16px;
-    padding-top: 14px;
+    margin-top: 14px;
+    padding-top: 12px;
     border-top: 1px solid var(--border-subtle);
 }
 
@@ -650,10 +632,12 @@ html, body {
     background: var(--bg-surface-subtle);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 10px 14px;
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .metric-label {
@@ -661,20 +645,26 @@ html, body {
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .metric-val {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     color: var(--text-main);
     font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-/* --- Stacked Charts Panel --- */
+/* --- Stacked Charts Panel (Compact) --- */
 .charts-stack {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 8px;
     flex: 1;
     justify-content: space-between;
 }
@@ -683,10 +673,10 @@ html, body {
     background: var(--bg-surface-subtle);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 10px 14px;
+    padding: 7px 10px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 .chart-item-header {
@@ -696,7 +686,7 @@ html, body {
 }
 
 .chart-item-title {
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -704,22 +694,22 @@ html, body {
 }
 
 .chart-item-value {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 700;
     font-family: 'JetBrains Mono', monospace;
     color: var(--samel-teal-dark);
 }
 
 .chart-canvas-box {
-    height: 75px;
+    height: 52px;
     width: 100%;
     position: relative;
 }
 
-/* --- Bottom 3 Columns Grid --- */
+/* --- Bottom 2 Columns Grid --- */
 .bottom-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1.15fr 0.85fr;
     gap: 20px;
 }
 
@@ -792,7 +782,7 @@ html, body {
 }
 
 .summary-table td {
-    padding: 10px 4px;
+    padding: 9px 4px;
 }
 
 .summary-table td.label-col {
@@ -807,35 +797,27 @@ html, body {
     color: var(--text-main);
 }
 
-/* System Info List */
-.system-info-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+/* --- Discrete App Footer --- */
+.app-footer {
+    margin-top: auto;
+    padding: 14px 32px;
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-surface);
+    font-size: 11.5px;
+    color: var(--text-muted);
 }
 
-.system-info-row {
+.footer-content {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 9px 12px;
-    background: var(--bg-surface-subtle);
-    border-radius: var(--radius-md);
-    font-size: 12px;
-}
-
-.sys-label {
-    color: var(--text-secondary);
-    font-weight: 500;
-    display: flex;
     align-items: center;
-    gap: 6px;
+    max-width: 100%;
 }
 
-.sys-val {
-    font-weight: 600;
+.footer-version {
     font-family: 'JetBrains Mono', monospace;
-    color: var(--text-main);
+    font-weight: 500;
+    color: var(--text-secondary);
 }
 
 /* --- Alert Overlay --- */
@@ -947,14 +929,7 @@ html, body {
     .kpi-grid {
         grid-template-columns: repeat(2, 1fr);
     }
-    .sidebar {
-        width: 72px;
-        min-width: 72px;
-    }
-    .brand-info, .nav-item span {
-        display: none;
-    }
-    .nav-item {
-        justify-content: center;
+    .patient-bar {
+        grid-template-columns: repeat(2, 1fr);
     }
 }

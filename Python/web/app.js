@@ -157,10 +157,15 @@
             else if (colRatio > 0.20) regionName = `Poplíteo / Joelhos (${Math.round(peakVal * 100)}%)`;
             else regionName = `Calcâneos / Pés (${Math.round(peakVal * 100)}%)`;
         }
-        DOM.metricPeak.textContent = regionName;
+        if (DOM.metricPeak) {
+            DOM.metricPeak.textContent = regionName;
+            DOM.metricPeak.title = regionName;
+        }
 
         const distScore = activeCount > 20 ? (1 - Math.abs(peakVal - 0.5)).toFixed(2) : "0.90";
-        DOM.metricDistribution.textContent = `${distScore} (Uniforme)`;
+        if (DOM.metricDistribution) {
+            DOM.metricDistribution.textContent = `${distScore} (Uniforme)`;
+        }
     }
 
     /* --- Time Formatter Helper --- */
@@ -470,9 +475,55 @@
         });
     }
 
+    /* --- Charts Panel Collapse/Expand Controller --- */
+    function setupChartsToggle() {
+        const centralGrid = document.getElementById("central-grid");
+        const chartsPanel = document.getElementById("panel-charts");
+        const collapsedTrigger = document.getElementById("collapsed-charts-trigger");
+        const btnCollapse = document.getElementById("btn-collapse-charts");
+
+        function setExpanded(expanded) {
+            if (!centralGrid || !chartsPanel) return;
+
+            if (expanded) {
+                centralGrid.classList.add("charts-expanded");
+                chartsPanel.classList.remove("collapsed");
+            } else {
+                centralGrid.classList.remove("charts-expanded");
+                chartsPanel.classList.add("collapsed");
+            }
+
+            setTimeout(() => {
+                if (chartWeightInstance) chartWeightInstance.resize();
+                if (chartPostureInstance) chartPostureInstance.resize();
+                if (chartTimeInstance) chartTimeInstance.resize();
+            }, 300);
+        }
+
+        if (collapsedTrigger) {
+            collapsedTrigger.addEventListener("click", () => setExpanded(true));
+        }
+
+        if (chartsPanel) {
+            chartsPanel.addEventListener("click", (e) => {
+                if (chartsPanel.classList.contains("collapsed")) {
+                    setExpanded(true);
+                }
+            });
+        }
+
+        if (btnCollapse) {
+            btnCollapse.addEventListener("click", (e) => {
+                e.stopPropagation();
+                setExpanded(false);
+            });
+        }
+    }
+
     /* --- Inicialização do Dashboard --- */
     function init() {
         initCharts();
+        setupChartsToggle();
         setInterval(pollSensorData, 80); // ~12-15 FPS para performance fluida
     }
 

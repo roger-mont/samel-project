@@ -20,3 +20,6 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+# Backups
+calib_backup/
