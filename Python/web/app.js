@@ -38,9 +38,11 @@
         chartLivePosture: document.getElementById("chart-live-posture"),
         chartLiveTime: document.getElementById("chart-live-time"),
 
-        // Overlay
+        // Overlay & Summary
         alertOverlay: document.getElementById("alert-overlay"),
         alertTime: document.getElementById("alert-time"),
+        sysCalibration: document.getElementById("sys-calibration"),
+        summaryLimit: document.getElementById("summary-limit"),
     };
 
     /* --- State --- */
@@ -437,6 +439,30 @@
         return matrix;
     }
 
+    /* --- Calibration & Timeout Formatters --- */
+    function formatCalibrationDate(isoStr) {
+        if (!isoStr) return "14/08/2026 às 16:10";
+        try {
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return isoStr;
+            const day = d.getDate().toString().padStart(2, "0");
+            const month = (d.getMonth() + 1).toString().padStart(2, "0");
+            const year = d.getFullYear();
+            const hours = d.getHours().toString().padStart(2, "0");
+            const mins = d.getMinutes().toString().padStart(2, "0");
+            return `${day}/${month}/${year} às ${hours}:${mins}`;
+        } catch (e) {
+            return isoStr;
+        }
+    }
+
+    function formatTimeoutLimit(seconds) {
+        if (!seconds) return "60 min";
+        if (seconds < 60) return `${seconds}s`;
+        const mins = Math.round(seconds / 60);
+        return `${mins} min`;
+    }
+
     /* --- Polling Loop --- */
     async function pollSensorData() {
         if (isEelAvailable && window.eel && window.eel.get_sensor_data) {
@@ -448,10 +474,15 @@
 
                     if (window.eel.get_calibration) {
                         const calib = await window.eel.get_calibration()();
-                        if (calib && calib.posture_timeout_seconds) {
-                            configuredTimeoutSec = calib.posture_timeout_seconds;
-                            if (DOM.kpiTimerLimit) {
-                                DOM.kpiTimerLimit.textContent = `${Math.round(configuredTimeoutSec / 60)} min`;
+                        if (calib) {
+                            if (calib.posture_timeout_seconds) {
+                                configuredTimeoutSec = calib.posture_timeout_seconds;
+                                const timeoutFormatted = formatTimeoutLimit(configuredTimeoutSec);
+                                if (DOM.kpiTimerLimit) DOM.kpiTimerLimit.textContent = timeoutFormatted;
+                                if (DOM.summaryLimit) DOM.summaryLimit.textContent = timeoutFormatted;
+                            }
+                            if (calib.calibrated_at && DOM.sysCalibration) {
+                                DOM.sysCalibration.textContent = formatCalibrationDate(calib.calibrated_at);
                             }
                         }
                     }
@@ -473,6 +504,13 @@
             is_alert: false,
             status: "conectado",
         });
+
+        if (DOM.sysCalibration && (!DOM.sysCalibration.textContent || DOM.sysCalibration.textContent.includes("Hoje"))) {
+            DOM.sysCalibration.textContent = "14/08/2026 às 16:10";
+        }
+        if (DOM.summaryLimit) {
+            DOM.summaryLimit.textContent = formatTimeoutLimit(configuredTimeoutSec);
+        }
     }
 
     /* --- Charts Panel Collapse/Expand Controller --- */

@@ -23,11 +23,8 @@ MANTA_WIDTH_M: float = 0.90    # largura da maca (m)
 MANTA_HEIGHT_M: float = 1.80   # comprimento da maca (m)
 PIXEL_AREA_M2: float = (MANTA_WIDTH_M / HID_COLS) * (MANTA_HEIGHT_M / HID_ROWS)
 
-API_PORT: int = 8000
-API_HOST: str = "0.0.0.0"
 TARE_SAMPLE_COUNT: int = 5
 TARE_FILE: str = "tare.json"
-WS_PUSH_INTERVAL_SECONDS: int = 10
 
 # Critério de estabilidade (Metodologia §13)
 STABILITY_EPSILON_KG: float = 0.3       # |Δm| máximo entre frames consecutivos
@@ -48,7 +45,7 @@ class CalibrationParams:
     deadzone_threshold: float = 2.0    # ignora sensores com valor <= este limiar
     ema_alpha: float = 0.3              # suavização exponencial do peso total
     posture_tolerance: float = 0.15
-    posture_timeout_seconds: int = 60
+    posture_timeout_seconds: int = 3600
     _lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,

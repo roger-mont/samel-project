@@ -278,9 +278,35 @@ def get_current_snapshot() -> dict:
         }
 
 
+def _get_latest_calibration_date(calib_path: str = "calibration.json") -> str | None:
+    """Extrai a data mais recente de calibração do calibration.json."""
+    try:
+        import json
+        from pathlib import Path
+        p = Path(calib_path)
+        if not p.exists():
+            return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+        blocks = data.get("blocks", {})
+        dates = [
+            b.get("calibrated_at")
+            for b in blocks.values()
+            if isinstance(b, dict) and b.get("calibrated_at")
+        ]
+        if dates:
+            return sorted(dates)[-1]
+        return data.get("calibrated_at")
+    except Exception:
+        return None
+
+
 def get_calibration_snapshot() -> dict:
-    """Retorna cópia dos parâmetros de calibração."""
-    return _calibration_ref.snapshot()
+    """Retorna cópia dos parâmetros de calibração acrescido da data de calibração."""
+    snap = _calibration_ref.snapshot()
+    calib_date = _get_latest_calibration_date()
+    if calib_date:
+        snap["calibrated_at"] = calib_date
+    return snap
 
 
 def update_calibration_param(key: str, value: float) -> dict:

@@ -9,8 +9,7 @@ import threading
 
 import eel
 
-import api.server as api_server
-from config.settings import CalibrationParams, API_PORT
+from config.settings import CalibrationParams
 from services.serial_reader import SerialFrameReader, FakeSerialReader, HidFrameReader
 from providers.posture_monitor import PostureMonitor
 from bridge import start_reading_loop, set_calibration_ref, set_monitor_ref, set_reader_ref
@@ -41,18 +40,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _start_api_server(port: int) -> None:
-    """Inicia o servidor FastAPI em thread daemon separada."""
-    thread = threading.Thread(
-        target=api_server.start,
-        kwargs={"port": port},
-        daemon=True,
-        name="fastapi-uvicorn",
-    )
-    thread.start()
-    logger.info("API iniciada — http://localhost:%d/docs", port)
-
-
 def main() -> None:
     args = parse_args()
 
@@ -76,7 +63,6 @@ def main() -> None:
 
     set_reader_ref(reader)
     start_reading_loop(reader, params, monitor)
-    _start_api_server(API_PORT)
 
     web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
     eel.init(web_dir)
