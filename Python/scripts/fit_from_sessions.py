@@ -74,7 +74,14 @@ def fit_and_update_block(
     forces_n = weights_arr * GRAVITY_M_S2
 
     degree = min(2, len(weights_arr) - 1)
-    coeffs_n = np.polyfit(net_sums, forces_n, deg=degree).tolist()
+    if degree == 2:
+        A = np.column_stack([net_sums ** 2, net_sums])
+        fit_res, _, _, _ = np.linalg.lstsq(A, forces_n, rcond=None)
+        coeffs_n = [float(fit_res[0]), float(fit_res[1]), 0.0]
+    else:
+        A = net_sums[:, np.newaxis]
+        fit_res, _, _, _ = np.linalg.lstsq(A, forces_n, rcond=None)
+        coeffs_n = [float(fit_res[0]), 0.0]
 
     predicted_n = np.polyval(coeffs_n, net_sums)
     rmse_n = float(np.sqrt(np.mean((predicted_n - forces_n) ** 2)))

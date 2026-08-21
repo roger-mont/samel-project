@@ -13,7 +13,9 @@ pip-delete-this-directory.txt
 # Runtime artifacts
 Python/tare.json
 tare.json
-sessions/
+.calib_backup
+calib_backup/
+calib_backup
 
 # OS-specific
 Thumbs.db

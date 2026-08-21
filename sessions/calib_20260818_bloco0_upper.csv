@@ -1,0 +1,2 @@
+timestamp_iso,session_id,software_version,block_id,reference_kg,reference_n,position_tag,repetition,raw_sum_block,net_sum_block,mean_raw_block,std_raw_block,cv_pct,estimated_kg,estimated_n,stability_state,time_since_load_s,tare_block_sum
+2026-08-18T09:00:03.430593-04:00,649fbed9-e248-422f-a9c6-036eea11c296,1.0.0,0,2.347,23.0241,upper,4,1930.9645,845.49,1930.9645,0.5267,28.6544,1.363,13.371,transient,5.0,1085.4745

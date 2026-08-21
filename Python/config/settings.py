@@ -26,12 +26,14 @@ PIXEL_AREA_M2: float = (MANTA_WIDTH_M / HID_COLS) * (MANTA_HEIGHT_M / HID_ROWS)
 TARE_SAMPLE_COUNT: int = 5
 TARE_FILE: str = "tare.json"
 
-# Critério de estabilidade (Metodologia §13)
-STABILITY_EPSILON_KG: float = 0.3       # |Δm| máximo entre frames consecutivos
-STABILITY_TMIN_S: float = 10.0          # janela mínima para travar o peso
-STABILITY_VARIANCE_KG2: float = 0.25    # variância máxima da janela
-STABILITY_DRIFT_KG_S: float = 0.15      # drift máximo em kg/s
-STABILITY_WINDOW_SIZE: int = 20         # frames na janela de variância/drift
+# Critério de estabilidade e Média Móvel Contínua (60s)
+STABILITY_EPSILON_KG: float = 0.5       # |Δm| máximo entre frames consecutivos
+STABILITY_TMIN_S: float = 10.0          # janela mínima para progresso de estabilidade
+STABILITY_VARIANCE_KG2: float = 0.5    # variância máxima da janela
+STABILITY_DRIFT_KG_S: float = 0.8      # drift máximo em kg/s
+STABILITY_WINDOW_SIZE: int = 40         # frames na janela de variância/drift
+WEIGHT_WINDOW_SECONDS: float = 60.0    # janela de média móvel contínua (1 minuto)
+FAST_RESET_THRESHOLD_KG: float = 2.0   # degrau que aciona reset imediato do buffer móvel
 
 
 @dataclass
@@ -42,8 +44,8 @@ class CalibrationParams:
     de pressão. Não há conversão de tensão ou resistência.
     """
 
-    deadzone_threshold: float = 2.0    # ignora sensores com valor <= este limiar
-    ema_alpha: float = 0.3              # suavização exponencial do peso total
+    deadzone_threshold: float = 10    # ignora sensores com valor <= este limiar
+    ema_alpha: float = 0.5              # suavização exponencial do peso total
     posture_tolerance: float = 0.15
     posture_timeout_seconds: int = 3600
     _lock: threading.Lock = field(

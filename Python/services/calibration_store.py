@@ -47,11 +47,7 @@ BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
 
 
 class _BlockCalib:
-    """Calibração de um único bloco 16×16.
-
-    A curva polinomial converte net_sum → Newton.
-    A conversão para kg é feita dividindo por g (9.81 m/s²).
-    """
+    """Calibração de um único bloco 16×16 com intercepto zero obrigatório."""
 
     __slots__ = ("coefficients", "tare", "rmse_n", "rmse_kg")
 
@@ -67,30 +63,51 @@ class _BlockCalib:
         self.rmse_n = rmse_n
         self.rmse_kg = rmse_kg
 
-    def sum_to_newton(self, raw_sum: float) -> float:
-        """Converte soma bruta do bloco em força (Newton) via polinômio."""
+    def sum_to_contribution(self, raw_sum: float) -> float:
+        """Converte soma líquida em contribuição calibrada C_k (passa pela origem)."""
         if raw_sum <= self.tare:
             return 0.0
         net = raw_sum - self.tare
         val = float(np.polyval(self.coefficients, net))
         return max(0.0, val)
 
+    def sum_to_newton(self, raw_sum: float) -> float:
+        """Alias para sum_to_contribution mantendo compatibilidade."""
+        return self.sum_to_contribution(raw_sum)
+
     def sum_to_kg(self, raw_sum: float) -> float:
-        """Converte soma bruta do bloco em massa (kg) = F / g."""
-        return self.sum_to_newton(raw_sum) / GRAVITY_M_S2
+        """Converte soma líquida em massa equivalente (kg)."""
+        return self.sum_to_contribution(raw_sum) / GRAVITY_M_S2
 
 
 class CalibData:
-    """Dados de calibração para todos os blocos disponíveis.
+    """Dados de calibração multi-modelo para a maca inteira.
 
-    Atributos públicos:
-        is_valid  — True se pelo menos 1 bloco foi calibrado
-        blocks    — dict[block_id_int → _BlockCalib]
+    Suporta:
+      - 'multivariate_linear': P̂ = b₀ + Σ bₖ Sₖ (Modelo B - Principal)
+      - 'simple_sum': P̂ = a S_T + b (Modelo A - Baseline)
+      - 'multivariate_quadratic': P̂ = b₀ + Σ bₖ Sₖ + Σ cₖ Sₖ² (Modelo C)
+      - 'block_curves': Curvas por bloco com correção global (Legado)
     """
 
-    def __init__(self, blocks: dict[int, _BlockCalib]) -> None:
-        self.blocks = blocks
-        self.is_valid = len(blocks) > 0
+    def __init__(
+        self,
+        blocks: dict[int, _BlockCalib] | None = None,
+        correction_c: tuple[float, float] | None = None,
+        active_model: str = "block_curves",
+        model_b_coeffs: dict[str, float] | None = None,
+        model_a_coeffs: tuple[float, float] | None = None,
+        model_c_coeffs: dict[str, Any] | None = None,
+        block_tares: dict[int, float] | None = None,
+    ) -> None:
+        self.blocks = blocks or {}
+        self.correction_c = correction_c
+        self.active_model = active_model
+        self.model_b_coeffs = model_b_coeffs  # {"b0": float, "b1": float, ... "b8": float}
+        self.model_a_coeffs = model_a_coeffs  # (a, b)
+        self.model_c_coeffs = model_c_coeffs  # {"b0": float, "linear": [...], "quadratic": [...]}
+        self.block_tares = block_tares or {bid: 0.0 for bid in BLOCK_REGIONS}
+        self.is_valid = bool(self.blocks or self.model_b_coeffs or self.model_a_coeffs)
         self._fallback: _BlockCalib | None = self._best_fallback()
 
     def _best_fallback(self) -> _BlockCalib | None:
@@ -101,8 +118,57 @@ class CalibData:
     def _resolve(self, block_id: int) -> _BlockCalib | None:
         return self.blocks.get(block_id, self._fallback)
 
+    def extract_block_net_sums(self, matrix: np.ndarray) -> np.ndarray:
+        """Extrai vetor líquido [S1, ..., S8] dos 8 blocos."""
+        net_sums = np.zeros(8, dtype=np.float64)
+        for idx, (bid, (row_sl, col_sl)) in enumerate(sorted(BLOCK_REGIONS.items())):
+            raw_s = float(matrix[row_sl, col_sl].sum())
+            tare_s = self.block_tares.get(bid, 0.0)
+            if calb := self.blocks.get(bid):
+                tare_s = calb.tare
+            net_sums[idx] = max(0.0, raw_s - tare_s)
+        return net_sums
+
+    def predict_mass(self, matrix: np.ndarray) -> float:
+        """Calcula o peso estimado (kg) usando o modelo ativo."""
+        if not self.is_valid:
+            return float(np.sum(matrix))
+
+        net_sums = self.extract_block_net_sums(matrix)
+        total_net = float(np.sum(net_sums))
+
+        # Se não há carga na maca após a tara, retorna 0
+        if total_net <= 0.0:
+            return 0.0
+
+        if self.active_model == "multivariate_linear" and self.model_b_coeffs:
+            b0 = self.model_b_coeffs.get("b0", 0.0)
+            pred = b0
+            for idx in range(8):
+                b_k = self.model_b_coeffs.get(f"b{idx + 1}", 0.0)
+                pred += b_k * net_sums[idx]
+            return max(0.0, float(pred))
+
+        if self.active_model == "simple_sum" and self.model_a_coeffs:
+            a, b = self.model_a_coeffs
+            return max(0.0, float(a * total_net + b))
+
+        if self.active_model == "multivariate_quadratic" and self.model_c_coeffs:
+            b0 = self.model_c_coeffs.get("b0", 0.0)
+            lin = self.model_c_coeffs.get("linear", [0.0] * 8)
+            quad = self.model_c_coeffs.get("quadratic", [0.0] * 8)
+            pred = b0 + np.sum(np.array(lin) * net_sums) + np.sum(np.array(quad) * (net_sums ** 2))
+            return max(0.0, float(pred))
+
+        # Modelo Legado (Curvas por bloco + Correção C)
+        m_base = self.matrix_to_kg(matrix)
+        if self.correction_c is not None:
+            a, b = self.correction_c
+            return max(0.0, a * m_base + b)
+        return m_base
+
     def matrix_to_newton(self, matrix: np.ndarray) -> float:
-        """Converte a matriz 32×64 completa em força total (Newton)."""
+        """Converte a matriz 32×64 em contribuição total via blocos."""
         if not self.is_valid:
             return float(np.sum(matrix))
 
@@ -111,17 +177,17 @@ class CalibData:
             block_sum = float(matrix[row_sl, col_sl].sum())
             calb = self._resolve(bid)
             if calb is not None:
-                total_n += calb.sum_to_newton(block_sum)
+                total_n += calb.sum_to_contribution(block_sum)
             else:
                 total_n += block_sum
         return total_n
 
     def matrix_to_kg(self, matrix: np.ndarray) -> float:
-        """Converte a matriz 32×64 completa em massa (kg) = F_total / g."""
+        """Converte a matriz 32×64 em massa base (kg) = C_total / g."""
         return self.matrix_to_newton(matrix) / GRAVITY_M_S2
 
     def matrix_to_force_field(self, matrix: np.ndarray) -> np.ndarray:
-        """Retorna matriz 32×64 com força em Newton por pixel (campo 2D)."""
+        """Retorna matriz 32×64 com força distribuída por pixel (campo 2D)."""
         force_field = np.zeros_like(matrix, dtype=np.float64)
         for bid, (row_sl, col_sl) in BLOCK_REGIONS.items():
             calb = self._resolve(bid)
@@ -131,37 +197,34 @@ class CalibData:
             block_sum = float(block.sum())
             if block_sum <= 0.0:
                 continue
-            f_total_block = calb.sum_to_newton(block_sum)
-            force_field[row_sl, col_sl] = (block / block_sum) * f_total_block
+            c_block = calb.sum_to_contribution(block_sum)
+            force_field[row_sl, col_sl] = (block / block_sum) * c_block
         return force_field
 
     @classmethod
     def null(cls) -> "CalibData":
         obj = object.__new__(cls)
         obj.blocks = {}
+        obj.correction_c = None
+        obj.active_model = "block_curves"
+        obj.model_b_coeffs = None
+        obj.model_a_coeffs = None
+        obj.model_c_coeffs = None
+        obj.block_tares = {bid: 0.0 for bid in BLOCK_REGIONS}
         obj.is_valid = False
         obj._fallback = None
         return obj
 
 
 # ---------------------------------------------------------------------------
-# Loader — suporta v1, v2 e v3
+# Loader — suporta v1, v2, v3 e v4
 # ---------------------------------------------------------------------------
 
 def _build_block(bdata: dict) -> _BlockCalib:
-    """Constrói _BlockCalib a partir de um dict de bloco (v2 ou v3)."""
-    unit = bdata.get("unit", "kg")
-
-    if unit == "newton":
-        coeffs = bdata["coefficients_raw_to_n"]
-        rmse_n = float(bdata.get("rmse_n", 0.0))
-        rmse_kg = float(bdata.get("rmse_kg", rmse_n / GRAVITY_M_S2))
-    else:
-        # v2 legado: coeficientes em kg → converter para Newton
-        coeffs_kg = np.array(bdata["coefficients"])
-        coeffs = (coeffs_kg * GRAVITY_M_S2).tolist()
-        rmse_kg = float(bdata.get("rmse_kg", 0.0))
-        rmse_n = rmse_kg * GRAVITY_M_S2
+    """Constrói _BlockCalib garantindo passagem pela origem."""
+    coeffs = bdata.get("coefficients_raw_to_n") or bdata.get("coefficients", [0.0, 0.0])
+    rmse_n = float(bdata.get("rmse_n", 0.0))
+    rmse_kg = float(bdata.get("rmse_kg", rmse_n / GRAVITY_M_S2))
 
     return _BlockCalib(
         coefficients=coeffs,
@@ -197,14 +260,10 @@ def _parse_v1_block(raw: dict) -> dict[int, _BlockCalib]:
 
 
 def load_calibration(path: str | Path) -> CalibData:
-    """Carrega calibration.json e retorna CalibData.
-
-    Aceita formato v1 (bloco único), v2 (multi-bloco, kg) e v3 (multi-bloco, Newton).
-    Retorna CalibData.null() se arquivo ausente ou inválido.
-    """
+    """Carrega calibration.json e retorna CalibData estruturado."""
     calib_path = Path(path)
     if not calib_path.exists():
-        logger.warning("calibration.json não encontrado em %s — peso sem calibração", calib_path)
+        logger.warning("calibration.json não encontrado em %s — usando fallback", calib_path)
         return CalibData.null()
 
     try:
@@ -213,21 +272,31 @@ def load_calibration(path: str | Path) -> CalibData:
         logger.error("calibration.json inválido: %s", err)
         return CalibData.null()
 
-    try:
-        version = raw.get("version", 1)
-        if version in (2, 3):
-            blocks = _parse_blocks(raw)
-        else:
-            blocks = _parse_v1_block(raw)
-    except (KeyError, ValueError) as err:
-        logger.error("erro ao interpretar calibration.json: %s", err)
-        return CalibData.null()
+    version = raw.get("version", 1)
+    blocks = _parse_blocks(raw) if version in (2, 3, 4) else _parse_v1_block(raw)
 
-    calib = CalibData(blocks)
-    logger.info(
-        "calibracao carregada (v%s): %d bloco(s) — IDs %s",
-        version,
-        len(blocks),
-        sorted(blocks.keys()),
+    correction_c: tuple[float, float] | None = None
+    if "correction_model_c" in raw:
+        c_data = raw["correction_model_c"]
+        if "a" in c_data and "b" in c_data:
+            correction_c = (float(c_data["a"]), float(c_data["b"]))
+
+    active_model = raw.get("active_model", "block_curves")
+    model_b = raw.get("models", {}).get("multivariate_linear") or raw.get("model_b_multivariate")
+    model_a_dict = raw.get("models", {}).get("simple_sum") or raw.get("model_a_simple_sum")
+    model_a = (float(model_a_dict["a"]), float(model_a_dict["b"])) if model_a_dict else None
+    model_c = raw.get("models", {}).get("multivariate_quadratic")
+
+    block_tares = {bid: b.tare for bid, b in blocks.items()}
+
+    calib = CalibData(
+        blocks=blocks,
+        correction_c=correction_c,
+        active_model=active_model,
+        model_b_coeffs=model_b,
+        model_a_coeffs=model_a,
+        model_c_coeffs=model_c,
+        block_tares=block_tares,
     )
+    logger.info("calibracao carregada (v%s, modelo=%s): %d blocos", version, active_model, len(blocks))
     return calib
