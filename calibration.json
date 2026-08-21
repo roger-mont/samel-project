@@ -557,13 +557,13 @@
     }
   },
   "correction_model_c": {
-    "a": 0.818799,
-    "b": 1.004462,
-    "rmse_validation_kg": 0.7517,
-    "mae_validation_kg": 0.5481,
-    "r2_validation": 0.9333,
-    "trained_on_n_samples": 27,
-    "validated_on_n_samples": 13
+    "a": 2.200854,
+    "b": -4.649083,
+    "rmse_validation_kg": 7.6976,
+    "mae_validation_kg": 4.793,
+    "r2_validation": 0.7604,
+    "trained_on_n_samples": 29,
+    "validated_on_n_samples": 14
   },
   "active_model": "multivariate_linear",
   "calibrated_at": "2026-08-18T16:19:36.782132-04:00",
