@@ -35,14 +35,14 @@ logger = logging.getLogger(__name__)
 GRAVITY_M_S2: float = 9.81
 
 BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
-    1: (slice(16, 32), slice(0,  16)),
-    2: (slice(16, 32), slice(16, 32)),
-    3: (slice(16, 32), slice(32, 48)),
-    4: (slice(16, 32), slice(48, 64)),
-    5: (slice(0,  16), slice(48, 64)),
-    6: (slice(0,  16), slice(32, 48)),
-    7: (slice(0,  16), slice(16, 32)),
-    8: (slice(0,  16), slice(0,  16)),
+    1: (slice(0,  16), slice(48, 64)),  # Canto Superior Direito
+    2: (slice(0,  16), slice(32, 48)),  # Superior Meio-Direito
+    3: (slice(0,  16), slice(16, 32)),  # Superior Meio-Esquerdo
+    4: (slice(0,  16), slice(0,  16)),  # Canto Superior Esquerdo
+    5: (slice(16, 32), slice(0,  16)),  # Canto Inferior Esquerdo
+    6: (slice(16, 32), slice(16, 32)),  # Inferior Meio-Esquerdo
+    7: (slice(16, 32), slice(32, 48)),  # Inferior Meio-Direito
+    8: (slice(16, 32), slice(48, 64)),  # Canto Inferior Direito
 }
 
 

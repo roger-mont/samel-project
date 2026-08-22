@@ -34,14 +34,14 @@ except ImportError:
 
 
 BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
-    1: (slice(16, 32), slice(0,  16)),
-    2: (slice(16, 32), slice(16, 32)),
-    3: (slice(16, 32), slice(32, 48)),
-    4: (slice(16, 32), slice(48, 64)),
-    5: (slice(0,  16), slice(48, 64)),
-    6: (slice(0,  16), slice(32, 48)),
-    7: (slice(0,  16), slice(16, 32)),
-    8: (slice(0,  16), slice(0,  16)),
+    1: (slice(0,  16), slice(48, 64)),  # Canto Superior Direito
+    2: (slice(0,  16), slice(32, 48)),  # Superior Meio-Direito
+    3: (slice(0,  16), slice(16, 32)),  # Superior Meio-Esquerdo
+    4: (slice(0,  16), slice(0,  16)),  # Canto Superior Esquerdo
+    5: (slice(16, 32), slice(0,  16)),  # Canto Inferior Esquerdo
+    6: (slice(16, 32), slice(16, 32)),  # Inferior Meio-Esquerdo
+    7: (slice(16, 32), slice(32, 48)),  # Inferior Meio-Direito
+    8: (slice(16, 32), slice(48, 64)),  # Canto Inferior Direito
 }
 
 POSITION_OPTIONS: dict[str, str] = {
@@ -66,6 +66,7 @@ def _parse_packet(data: bytes, matrix: np.ndarray) -> None:
     block_id = data[0]
     if block_id == 0 or block_id > 8:
         return
+    eff_id = ((block_id + 3) % 8) + 1
     for i in range(1, len(data) - 1, 3):
         if i + 2 >= len(data):
             break
@@ -74,12 +75,12 @@ def _parse_packet(data: bytes, matrix: np.ndarray) -> None:
         pressure = data[i + 2]
         if x_local == 0 or y_local == 0:
             break
-        if block_id < 5:
-            x = 16 * ((9 - block_id) // 5) + (16 - x_local)
-            y = 16 * (block_id - 1) + (16 - y_local)
+        if eff_id < 5:
+            x = 16 * ((9 - eff_id) // 5) + (16 - x_local)
+            y = 16 * (eff_id - 1) + (16 - y_local)
         else:
-            x = 16 * ((9 - block_id) // 5) + (x_local - 1)
-            y = 16 * (8 - block_id) + (y_local - 1)
+            x = 16 * ((9 - eff_id) // 5) + (x_local - 1)
+            y = 16 * (8 - eff_id) + (y_local - 1)
         if 0 <= x < HID_ROWS and 0 <= y < HID_COLS:
             matrix[x, y] = float(pressure)
 

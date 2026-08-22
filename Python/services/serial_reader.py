@@ -304,12 +304,13 @@ class HidFrameReader(BaseFrameReader):
             if x_local == 0 or y_local == 0:
                 break
 
-            if block_id < 5:
-                x = 16 * ((9 - block_id) // 5) + (16 - x_local)
-                y = 16 * (block_id - 1) + (16 - y_local)
-            elif block_id < 9:
-                x = 16 * ((9 - block_id) // 5) + (x_local - 1)
-                y = 16 * (8 - block_id) + (y_local - 1)
+            eff_id = ((block_id + 3) % 8) + 1
+            if eff_id < 5:
+                x = 16 * ((9 - eff_id) // 5) + (16 - x_local)
+                y = 16 * (eff_id - 1) + (16 - y_local)
+            elif eff_id < 9:
+                x = 16 * ((9 - eff_id) // 5) + (x_local - 1)
+                y = 16 * (8 - eff_id) + (y_local - 1)
             else:
                 continue
 

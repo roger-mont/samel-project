@@ -104,3 +104,53 @@ class PostureMonitor:
             return True
 
         return False
+
+    def classify_posture(self, matrix: np.ndarray) -> dict:
+        """Classifica postura e calcula índice de assimetria lateral e alívio."""
+        total_sum = float(np.sum(matrix))
+        if total_sum < 1.0:
+            return {
+                "posture": "Leito Desocupado",
+                "asymmetry_pct": 0.0,
+                "asymmetry_label": "Sem Carga",
+                "relief_score": 100,
+            }
+
+        rows, cols = matrix.shape
+        half_rows = rows // 2
+        half_cols = cols // 2
+
+        left_sum = float(np.sum(matrix[:half_rows, :]))
+        right_sum = float(np.sum(matrix[half_rows:, :]))
+        diff = right_sum - left_sum
+        asym_pct = (abs(diff) / max(total_sum, 1e-6)) * 100.0
+
+        torso_sum = float(np.sum(matrix[:, half_cols:]))
+        legs_sum = float(np.sum(matrix[:, :half_cols]))
+
+        peak_val = float(np.max(matrix))
+
+        if asym_pct > 28.0:
+            if diff > 0:
+                posture = "Decúbito Lat. Dir."
+                asym_label = f"Assimetria: {round(asym_pct)}% Dir"
+            else:
+                posture = "Decúbito Lat. Esq."
+                asym_label = f"Assimetria: {round(asym_pct)}% Esq"
+        else:
+            if torso_sum / (legs_sum + 0.1) > 3.2:
+                posture = "Posição de Fowler"
+                asym_label = "Cabeceira Elevada"
+            else:
+                posture = "Decúbito Dorsal"
+                asym_label = "Pressão Simétrica"
+
+        relief_score = max(15, min(99, int(100 - (peak_val * 65) - (asym_pct * 0.25))))
+
+        return {
+            "posture": posture,
+            "asymmetry_pct": round(asym_pct, 1),
+            "asymmetry_label": asym_label,
+            "relief_score": relief_score,
+        }
+

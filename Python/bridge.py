@@ -42,6 +42,12 @@ _rolling_history: collections.deque[tuple[float, float]] = collections.deque()
 _weight_locked: bool = False
 _locked_weight_kg: float = 0.0
 _stable_progress_pct: float = 0.0
+_current_posture_info: dict = {
+    "posture": "Decúbito Dorsal",
+    "asymmetry_pct": 0.0,
+    "asymmetry_label": "Pressão Simétrica",
+    "relief_score": 94,
+}
 
 
 def start_reading_loop(
@@ -167,6 +173,7 @@ def _reading_loop(
             monitor.update_tolerance(snap["posture_tolerance"])
             monitor.update_timeout(snap["posture_timeout_seconds"])
             alert = monitor.update(force_matrix)
+            posture_info = monitor.classify_posture(force_matrix)
 
             # Normaliza heatmap para 0-1
             max_val = float(np.max(force_matrix))
@@ -188,6 +195,7 @@ def _reading_loop(
                 _current_force_n = force_n
                 _static_seconds = monitor.elapsed_seconds
                 _is_alert = alert
+                _current_posture_info = posture_info
                 _connection_status = "conectado" if connected else "desconectado"
 
             if tare_to_save is not None:
@@ -217,6 +225,7 @@ def get_sensor_data() -> dict:
             "is_locked": _weight_locked,
             "locked_weight_kg": round(_locked_weight_kg, 2),
             "stable_progress_pct": round(_stable_progress_pct, 1),
+            "posture_info": _current_posture_info,
         }
 
 

@@ -578,7 +578,8 @@ html, body {
     pointer-events: none;
     z-index: 10;
     mix-blend-mode: multiply;
-    opacity: 0.9;
+    opacity: 0.35;
+    object-fit: fill;
 }
 
 /* Heatmap Vertical Legend */
