@@ -363,3 +363,170 @@ class LocalDatabase:
                     )
         except Exception as ex:
             logger.error("Erro na política de retenção de %s: %s", table_name, ex)
+
+    # -------------------------------------------------------------------------
+    # Métodos de Analítica e Agregação para o Dashboard
+    # -------------------------------------------------------------------------
+
+    def get_charts_analytics(self, window_hours: int = 4) -> dict[str, Any]:
+        """Calcula séries temporais de 9 pontos (4h em blocos de 30 min) para os 3 gráficos da UI."""
+        labels = ["-4h", "-3.5h", "-3h", "-2.5h", "-2h", "-1.5h", "-1h", "-30m", "Agora"]
+        now_ts = datetime.now(timezone.utc).timestamp()
+        
+        # 9 pontos com intervalos de 30 minutos (1800s cada)
+        # O ponto 0 é [-4.0h, -3.5h], o ponto 7 é [-0.5h, 0.0h], o ponto 8 é o momento atual ("Agora")
+        weights: list[float | None] = []
+        posture_indices: list[float | None] = []
+        static_times_min: list[float | None] = []
+
+        with self.get_connection() as conn:
+            for i in range(9):
+                if i < 8:
+                    # Blocos históricos de 30 minutos
+                    offset_start_s = (8 - i) * 1800
+                    offset_end_s = (7 - i) * 1800
+                    t_start_iso = datetime.fromtimestamp(now_ts - offset_start_s, timezone.utc).isoformat()
+                    t_end_iso = datetime.fromtimestamp(now_ts - offset_end_s, timezone.utc).isoformat()
+
+                    cursor = conn.execute(
+                        """
+                        SELECT 
+                            AVG(peso_kg) AS peso_avg,
+                            AVG(indice_postural) AS indice_avg,
+                            MAX(tempo_estatico_seg) AS max_tempo_seg
+                        FROM telemetry_queue
+                        WHERE timestamp >= ? AND timestamp < ?
+                        """,
+                        (t_start_iso, t_end_iso),
+                    )
+                else:
+                    # Ponto 8: "Agora" (últimos 5 minutos ou último registro conhecido)
+                    t_recent_iso = datetime.fromtimestamp(now_ts - 300, timezone.utc).isoformat()
+                    cursor = conn.execute(
+                        """
+                        SELECT 
+                            peso_kg AS peso_avg,
+                            indice_postural AS indice_avg,
+                            tempo_estatico_seg AS max_tempo_seg
+                        FROM telemetry_queue
+                        ORDER BY timestamp DESC, id DESC
+                        LIMIT 1
+                        """,
+                    )
+
+                row = cursor.fetchone()
+                if row and row["peso_avg"] is not None:
+                    weights.append(round(float(row["peso_avg"]), 2))
+                    posture_indices.append(round(float(row["indice_avg"] or 0.0), 3))
+                    max_tempo = float(row["max_tempo_seg"] or 0.0)
+                    static_times_min.append(round(max_tempo / 60.0, 1))
+                else:
+                    weights.append(None)
+                    posture_indices.append(None)
+                    static_times_min.append(None)
+
+        return {
+            "labels": labels,
+            "window_hours": window_hours,
+            "weight_series": weights,
+            "posture_series": posture_indices,
+            "time_series": static_times_min,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def get_recent_events(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Recupera os últimos N eventos posturais formatados para o painel de histórico."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT 
+                    id, timestamp, postura_anterior, postura_detectada,
+                    duracao_postura_anterior_seg, regiao_pico_pressao,
+                    pico_intensidade_pct, houve_alerta
+                FROM posture_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+            events = []
+            for r in rows:
+                item = dict(r)
+                # Formatar horário legível (HH:MM)
+                try:
+                    dt = datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00"))
+                    time_str = dt.strftime("%H:%M")
+                except Exception:
+                    time_str = "--:--"
+                
+                # Montar descrição amigável para a enfermagem
+                if item["houve_alerta"]:
+                    desc = f"Alerta de tempo estático excedido ({round(item['duracao_postura_anterior_seg']/60)} min). Risco de LPP."
+                    level = "warning"
+                elif item["postura_anterior"]:
+                    min_dur = round(item["duracao_postura_anterior_seg"] / 60)
+                    desc = f"Mudança de {item['postura_anterior']} para {item['postura_detectada']} ({min_dur} min anterior)."
+                    level = "info"
+                else:
+                    desc = f"Postura detectada: {item['postura_detectada']}."
+                    level = "normal"
+
+                events.append({
+                    "id": item["id"],
+                    "time": time_str,
+                    "timestamp": item["timestamp"],
+                    "description": desc,
+                    "level": level,
+                    "posture": item["postura_detectada"],
+                    "alert": bool(item["houve_alerta"]),
+                })
+            return events
+
+    def get_daily_summary(self, target_date: str | None = None) -> dict[str, Any]:
+        """Calcula as métricas do dia civil atual (das 00:00 às 23:59 de hoje)."""
+        with self.get_connection() as conn:
+            # 1. Total de rotações e tempo médio no dia de hoje
+            cursor_evt = conn.execute(
+                """
+                SELECT 
+                    COUNT(*) AS total_rotacoes,
+                    AVG(duracao_postura_anterior_seg) AS tempo_medio_seg
+                FROM posture_events
+                WHERE date(timestamp, 'localtime') = date('now', 'localtime')
+                """
+            )
+            row_evt = cursor_evt.fetchone()
+            total_rotacoes = int(row_evt["total_rotacoes"] or 0) if row_evt else 0
+            tempo_medio_min = round((float(row_evt["tempo_medio_seg"] or 0.0) / 60.0), 1) if row_evt else 0.0
+
+            # 2. Score de conformidade de alívio e total de alertas hoje
+            cursor_tel = conn.execute(
+                """
+                SELECT 
+                    COUNT(*) AS total_minutos,
+                    SUM(status_alerta) AS total_alertas
+                FROM telemetry_queue
+                WHERE date(timestamp, 'localtime') = date('now', 'localtime')
+                """
+            )
+            row_tel = cursor_tel.fetchone()
+            total_minutos = int(row_tel["total_minutos"] or 0) if row_tel else 0
+            total_alertas = int(row_tel["total_alertas"] or 0) if row_tel else 0
+
+            # Se não houver minutos hoje, score padrão é 100%
+            if total_minutos > 0:
+                score_alivio = round(100.0 - (total_alertas * 100.0 / total_minutos), 1)
+                score_alivio = max(0.0, min(100.0, score_alivio))
+            else:
+                score_alivio = 100.0
+
+            return {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "total_rotations_today": total_rotacoes,
+                "avg_posture_time_min": tempo_medio_min,
+                "relief_score_pct": score_alivio,
+                "total_alerts_today": total_alertas,
+                "total_minutes_monitored": total_minutos,
+            }
+

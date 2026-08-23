@@ -1,0 +1,15 @@
+{
+  "maca_id": "MACA-001",
+  "sqlite_db_path": "D:\\PrOJETOS\\samel-project\\apps\\edge-service\\data\\edge_maca.db",
+  "max_retention_records": 50000,
+  "retention_days": 7,
+  "central_api_url": "",
+  "edge_api_token": "edge-default-token",
+  "sync_batch_size": 50,
+  "sync_interval_sec": 90.0,
+  "cb_failure_threshold": 4,
+  "cb_recovery_timeout_sec": 30.0,
+  "server_host": "0.0.0.0",
+  "server_port": 8000,
+  "log_level": "INFO"
+}

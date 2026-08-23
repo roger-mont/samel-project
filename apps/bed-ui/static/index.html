@@ -35,6 +35,9 @@
                     <span class="top-bar-sub">Monitoramento contínuo em tempo real com sensorização de leito</span>
                 </div>
                 <div class="top-bar-right">
+                    <button id="btn-open-config" class="btn-config-gear" title="Configurações do Leito" aria-label="Abrir Configurações">
+                        ⚙️ Configurações
+                    </button>
                     <div class="status-chip" id="system-status-chip">
                         <span class="status-dot" id="system-status-dot"></span>
                         <span class="status-text" id="system-status-text">Conectado</span>
@@ -245,7 +248,7 @@
                             <div class="chart-item">
                                 <div class="chart-item-header">
                                     <span class="chart-item-title">Evolução do Peso</span>
-                                    <span class="chart-item-value" id="chart-live-weight">64.5 kg</span>
+                                    <span class="chart-item-value" id="chart-live-weight">--</span>
                                 </div>
                                 <div class="chart-canvas-box">
                                     <canvas id="chart-weight"></canvas>
@@ -256,7 +259,7 @@
                             <div class="chart-item">
                                 <div class="chart-item-header">
                                     <span class="chart-item-title">Índice Postural</span>
-                                    <span class="chart-item-value" id="chart-live-posture">Estável (0.04)</span>
+                                    <span class="chart-item-value" id="chart-live-posture">--</span>
                                 </div>
                                 <div class="chart-canvas-box">
                                     <canvas id="chart-posture"></canvas>
@@ -267,7 +270,7 @@
                             <div class="chart-item">
                                 <div class="chart-item-header">
                                     <span class="chart-item-title">Tempo na Condição</span>
-                                    <span class="chart-item-value" id="chart-live-time">18 min</span>
+                                    <span class="chart-item-value" id="chart-live-time">--</span>
                                 </div>
                                 <div class="chart-canvas-box">
                                     <canvas id="chart-time"></canvas>
@@ -283,24 +286,11 @@
                     <div class="panel-card" id="panel-events">
                         <div class="panel-header">
                             <h3 class="panel-title">Eventos Recentes</h3>
-                            <span class="panel-badge" id="events-count">4 registros</span>
+                            <span class="panel-badge" id="events-count">0 registros</span>
                         </div>
                         <ul class="events-list" id="events-list-container">
-                            <li class="event-entry info">
-                                <span class="event-time">18:15</span>
-                                <span class="event-desc">Calibração de tara confirmada pela equipe assistencial.</span>
-                            </li>
-                            <li class="event-entry">
-                                <span class="event-time">17:40</span>
-                                <span class="event-desc">Mudança postural para Decúbito Dorsal detectada.</span>
-                            </li>
-                            <li class="event-entry warning">
-                                <span class="event-time">16:35</span>
-                                <span class="event-desc">Alerta de tempo estático (60 min) atendido com sucesso.</span>
-                            </li>
-                            <li class="event-entry">
-                                <span class="event-time">15:30</span>
-                                <span class="event-desc">Início da sessão de monitoramento contínuo Samel.</span>
+                            <li class="event-empty" style="color: var(--samel-text-muted); font-size: 12px; padding: 12px 4px;">
+                                Nenhum evento recente registrado no leito.
                             </li>
                         </ul>
                     </div>
@@ -323,15 +313,15 @@
                                 </tr>
                                 <tr>
                                     <td class="label-col">Alterações Posturais Hoje</td>
-                                    <td class="val-col" id="summary-changes">7 rotações</td>
+                                    <td class="val-col" id="summary-changes">--</td>
                                 </tr>
                                 <tr>
                                     <td class="label-col">Tempo Médio por Postura</td>
-                                    <td class="val-col" id="summary-avg-time">42 min</td>
+                                    <td class="val-col" id="summary-avg-time">--</td>
                                 </tr>
                                 <tr>
                                     <td class="label-col">Score de Alívio de Pressão</td>
-                                    <td class="val-col" style="color: var(--samel-green);">94% (Ótimo)</td>
+                                    <td class="val-col" id="summary-score" style="color: var(--samel-green);">--</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -346,6 +336,51 @@
                     <span class="footer-version">Versão do Software: v2.1.0 Hospitalar</span>
                 </div>
             </footer>
+        </div>
+    </div>
+
+    <!-- Modal de Configurações Técnicas do Sistema -->
+    <div id="config-modal-overlay" class="modal-overlay hidden">
+        <div class="config-modal-card">
+            <div class="config-modal-header">
+                <div class="config-modal-title">
+                    <span class="config-icon">⚙️</span>
+                    <h3>Configurações do Leito e Conectividade</h3>
+                </div>
+                <button id="btn-close-config" class="btn-modal-close" aria-label="Fechar">&times;</button>
+            </div>
+            
+            <div class="config-modal-body">
+                <div class="config-form-group">
+                    <label for="input-config-maca-id">Identificador da Maca / Leito</label>
+                    <input type="text" id="input-config-maca-id" placeholder="Ex: MACA-UTI-01" />
+                    <span class="config-help">Nome exibido no painel central da enfermagem.</span>
+                </div>
+
+                <div class="config-form-group">
+                    <label for="input-config-central-url">URL do Servidor Central (Hospital)</label>
+                    <input type="text" id="input-config-central-url" placeholder="http://192.168.1.100:8000" />
+                    <span class="config-help">Endereço de sincronização Store-and-Forward.</span>
+                </div>
+
+                <div class="config-form-row">
+                    <div class="config-form-group half">
+                        <label for="input-config-sync-interval">Intervalo de Sync (s)</label>
+                        <input type="number" id="input-config-sync-interval" min="10" max="3600" value="60" />
+                    </div>
+                    <div class="config-form-group half">
+                        <label for="input-config-timeout-min">Alerta Estático (min)</label>
+                        <input type="number" id="input-config-timeout-min" min="5" max="240" value="60" />
+                    </div>
+                </div>
+
+                <div id="config-save-status" class="config-status-msg hidden"></div>
+            </div>
+
+            <div class="config-modal-footer">
+                <button id="btn-cancel-config" class="btn-secondary">Cancelar</button>
+                <button id="btn-save-config" class="btn-primary">Salvar e Aplicar</button>
+            </div>
         </div>
     </div>
 
