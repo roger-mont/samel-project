@@ -627,7 +627,7 @@
 
     /* --- Calibration & Timeout Formatters --- */
     function formatCalibrationDate(isoStr) {
-        if (!isoStr) return "14/08/2026 às 16:10";
+        if (!isoStr) return "--";
         try {
             const d = new Date(isoStr);
             if (isNaN(d.getTime())) return isoStr;
@@ -691,8 +691,8 @@
             status: "conectado",
         });
 
-        if (DOM.sysCalibration && (!DOM.sysCalibration.textContent || DOM.sysCalibration.textContent.includes("Hoje"))) {
-            DOM.sysCalibration.textContent = "14/08/2026 às 16:10";
+        if (DOM.sysCalibration && (!DOM.sysCalibration.textContent || DOM.sysCalibration.textContent === "--")) {
+            DOM.sysCalibration.textContent = "--";
         }
         if (DOM.summaryLimit) {
             DOM.summaryLimit.textContent = formatTimeoutLimit(configuredTimeoutSec);

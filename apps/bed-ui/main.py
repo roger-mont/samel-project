@@ -64,7 +64,7 @@ def main() -> None:
     set_reader_ref(reader)
     start_reading_loop(reader, params, monitor)
 
-    web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+    web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
     eel.init(web_dir)
 
     logger.info("iniciando webview — http://localhost:8080")

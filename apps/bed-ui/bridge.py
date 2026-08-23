@@ -50,6 +50,21 @@ _current_posture_info: dict = {
 }
 
 
+def _resolve_file_path(filename: str) -> str:
+    """Busca o arquivo no CWD atual, no diretório do módulo ou na pasta storage."""
+    from pathlib import Path
+    app_dir = Path(__file__).resolve().parent
+    candidates = [
+        Path(filename),
+        app_dir / filename,
+        app_dir / "storage" / filename,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return str(app_dir / filename)
+
+
 def start_reading_loop(
     reader: BaseFrameReader,
     params: CalibrationParams,
@@ -57,7 +72,8 @@ def start_reading_loop(
     calib_path: str = "calibration.json",
 ) -> None:
     """Inicia thread daemon que lê frames e processa continuamente."""
-    calib = load_calibration(calib_path)
+    resolved_path = _resolve_file_path(calib_path)
+    calib = load_calibration(resolved_path)
     thread = threading.Thread(
         target=_reading_loop,
         args=(reader, params, monitor, calib),
@@ -292,23 +308,30 @@ def get_current_snapshot() -> dict:
 
 
 def _get_latest_calibration_date(calib_path: str = "calibration.json") -> str | None:
-    """Extrai a data mais recente de calibração do calibration.json."""
+    """Extrai a data mais recente de calibração do calibration.json (raiz ou blocos)."""
     try:
         import json
         from pathlib import Path
-        p = Path(calib_path)
+        resolved = _resolve_file_path(calib_path)
+        p = Path(resolved)
         if not p.exists():
             return None
         data = json.loads(p.read_text(encoding="utf-8"))
+        
+        dates: list[str] = []
+        # 1. Data global do modelo ativo (raiz)
+        if data.get("calibrated_at"):
+            dates.append(data["calibrated_at"])
+        
+        # 2. Datas de calibrações individuais dos blocos
         blocks = data.get("blocks", {})
-        dates = [
-            b.get("calibrated_at")
-            for b in blocks.values()
-            if isinstance(b, dict) and b.get("calibrated_at")
-        ]
+        for b in blocks.values():
+            if isinstance(b, dict) and b.get("calibrated_at"):
+                dates.append(b["calibrated_at"])
+        
         if dates:
             return sorted(dates)[-1]
-        return data.get("calibrated_at")
+        return None
     except Exception:
         return None
 
