@@ -103,14 +103,16 @@ class PostureMonitor:
         rows, cols = matrix.shape
         half_rows = rows // 2
         half_cols = cols // 2
-
-        left_sum = float(np.sum(matrix[:half_rows, :]))
-        right_sum = float(np.sum(matrix[half_rows:, :]))
+        # Orientação física real da maca:
+        # Linhas 0..15: Lado Direito (B1..B4) | Linhas 16..31: Lado Esquerdo (B8..B5)
+        # Colunas 0..31: Peseira (Pernas)     | Colunas 32..63: Cabeceira (Tronco/Cabeça)
+        right_sum = float(np.sum(matrix[:half_rows, :]))
+        left_sum = float(np.sum(matrix[half_rows:, :]))
         diff = right_sum - left_sum
         asym_pct = (abs(diff) / max(total_sum, 1e-6)) * 100.0
 
-        torso_sum = float(np.sum(matrix[:, half_cols:]))
-        legs_sum = float(np.sum(matrix[:, :half_cols]))
+        torso_sum = float(np.sum(matrix[:, half_cols:]))  # Cabeceira
+        legs_sum = float(np.sum(matrix[:, :half_cols]))    # Peseira
         peak_val = float(np.max(matrix))
 
         if asym_pct > 28.0:

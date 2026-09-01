@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+from datetime import datetime, timezone
 import logging
 import threading
 import time
@@ -16,7 +17,9 @@ from core.settings import (
 )
 from database.db_local import LocalDatabase
 from hardware.serial_reader import BaseFrameReader, HidFrameReader, FakeSerialReader
-from math_engine.pipeline import compute_force_matrix, compute_total_mass, compute_total_force, apply_ema
+from math_engine.creep_compensator import CreepCompensator, AutoReZero
+from math_engine.ml_weight import MLWeightPredictor
+from math_engine.pipeline import compute_force_matrix, compute_total_mass, compute_total_force, compute_cop, apply_ema
 from providers.posture_monitor import PostureMonitor
 from storage.calibration_store import CalibData, load_calibration
 from storage.tare_store import load_tare, save_tare
@@ -32,9 +35,11 @@ class AcquisitionWorker:
     """Worker autônomo 24/7 responsável por:
     1. Leitura contínua dos frames da manta sensora a ~40 Hz.
     2. Execução do pipeline matemático e cálculo do peso estável (janela móvel 60s).
-    3. Monitoramento postural e cálculo do tempo de permanência de decúbito.
-    4. Ingestão periódica a cada 60s no SQLite e registro de eventos imediatos.
-    5. Transmissão em tempo real via callbacks/WebSocket.
+    3. Compensação de creep/drift temporal dos FSRs.
+    4. Auto-rezero quando manta desocupada por >30s.
+    5. Monitoramento postural e cálculo do tempo de permanência de decúbito.
+    6. Ingestão periódica a cada 60s no SQLite e registro de eventos imediatos.
+    7. Transmissão em tempo real via callbacks/WebSocket.
     """
 
     def __init__(
@@ -54,9 +59,21 @@ class AcquisitionWorker:
         # Configurações e Armazenamento
         self.params = CalibrationParams()
         self.calib = load_calibration(_CALIB_PATH)
+        self.ml_predictor = MLWeightPredictor()
         self._tare_offset_kg = load_tare(_TARE_PATH)
         self._tare_pending = False
         self._tare_samples: list[float] = []
+
+        # Compensação de Creep e Auto-ReZero
+        self._creep = CreepCompensator(
+            settle_frames=15,
+            max_drift_kg_per_sec=0.3,
+            step_threshold_kg=FAST_RESET_THRESHOLD_KG,
+        )
+        self._auto_rezero = AutoReZero(
+            empty_threshold_kg=0.5,
+            empty_duration_seconds=30.0,
+        )
 
         # Monitor de Postura
         self.monitor = PostureMonitor(
@@ -85,6 +102,7 @@ class AcquisitionWorker:
             "is_locked": False,
             "locked_weight_kg": 0.0,
             "stable_progress_pct": 0.0,
+            "cop": {"row": 0.0, "col": 0.0},
             "posture_info": {
                 "posture": "Leito Livre",
                 "asymmetry_pct": 0.0,
@@ -143,16 +161,26 @@ class AcquisitionWorker:
                 connected = self._reader.is_connected()
                 adc_matrix = self._reader.read_frame()
 
-                # Pipeline Físico
+                # Pipeline Físico (ML prioritário com fallback para calibração)
                 force_matrix = compute_force_matrix(adc_matrix, self.params)
-                raw_mass = compute_total_mass(force_matrix, self.calib)
+                raw_mass = compute_total_mass(force_matrix, self.calib, self.ml_predictor)
                 snap = self.params.snapshot()
                 smoothed_mass = apply_ema(raw_mass, previous_weight, snap["ema_alpha"])
                 previous_weight = smoothed_mass
 
+                # Compensação de Creep — limita drift temporal
+                compensated_mass = self._creep.update(smoothed_mass)
+
                 # Tara
-                net_mass = max(0.0, smoothed_mass - self._tare_offset_kg)
+                net_mass = max(0.0, compensated_mass - self._tare_offset_kg)
                 force_n = compute_total_force(force_matrix, self.calib)
+
+                # Centro de Pressão 2D real
+                cop_row, cop_col = compute_cop(force_matrix)
+
+                # Auto-ReZero — recalibra baseline quando manta vazia por >30s
+                if self._auto_rezero.check(net_mass):
+                    self._execute_auto_tare(smoothed_mass)
 
                 # Média Móvel de 60 segundos com Reset Rápido
                 if net_mass < 0.5:
@@ -211,6 +239,7 @@ class AcquisitionWorker:
                         "is_locked": weight_locked,
                         "locked_weight_kg": round(locked_weight_kg, 2),
                         "stable_progress_pct": round(stable_progress_pct, 1),
+                        "cop": {"row": round(cop_row, 2), "col": round(cop_col, 2)},
                         "posture_info": posture_info,
                     }
 
@@ -264,3 +293,15 @@ class AcquisitionWorker:
                 with self._state_lock:
                     self._live_state["status"] = f"erro: {err}"
                 time.sleep(0.5)
+
+    def _execute_auto_tare(self, current_smoothed_mass: float) -> None:
+        """Executa re-zero automático quando a manta está vazia por tempo suficiente."""
+        old_tare = self._tare_offset_kg
+        self._tare_offset_kg = current_smoothed_mass
+        self._creep.reset()
+        save_tare(self._tare_offset_kg, _TARE_PATH)
+        logger.info(
+            "Auto-ReZero executado: tara %.4f → %.4f kg",
+            old_tare,
+            self._tare_offset_kg,
+        )

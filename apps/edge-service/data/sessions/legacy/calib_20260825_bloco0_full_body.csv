@@ -1,0 +1,4 @@
+timestamp_iso,session_id,software_version,block_id,reference_kg,reference_n,position_tag,repetition,raw_sum_block,net_sum_block,mean_raw_block,std_raw_block,cv_pct,estimated_kg,estimated_n,stability_state,time_since_load_s,tare_block_sum
+2026-08-25T08:44:31.972887-04:00,6fd9f3a9-2fb3-4af5-b30c-e6a450b06e5c,1.0.0,0,11.0,107.91,full_body,1,4202.89,2527.4128,4202.89,0.0101,0.5363,0.0,0.0,stable,60.0,1675.4772
+2026-08-25T08:46:17.650040-04:00,6fd9f3a9-2fb3-4af5-b30c-e6a450b06e5c,1.0.0,0,23.4,229.554,full_body,2,7114.82,5439.3428,7114.82,0.0198,0.1804,5.888,57.7613,stable,60.0,1675.4772
+2026-08-25T08:48:30.719650-04:00,6fd9f3a9-2fb3-4af5-b30c-e6a450b06e5c,1.0.0,0,30.7,301.167,full_body,3,9293.25,7617.7728,9293.25,0.0431,0.2647,11.178,109.6562,stable,60.0,1675.4772

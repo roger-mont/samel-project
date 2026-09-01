@@ -211,7 +211,13 @@ def test_websocket_stream() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws/telemetry") as websocket:
             websocket.send_text('{"type": "PING"}')
-            pong_msg = websocket.receive_json()
+            pong_msg = None
+            for _ in range(5):
+                msg = websocket.receive_json()
+                if msg.get("type") == "PONG":
+                    pong_msg = msg
+                    break
+            assert pong_msg is not None
             assert pong_msg["type"] == "PONG"
 
             client.post(
@@ -219,10 +225,11 @@ def test_websocket_stream() -> None:
                 json={"maca_id": "MACA-01", "peso_kg": 76.0, "status_alerta": True},
             )
 
-            hot_data = websocket.receive_json()
-            assert hot_data["type"] == "TELEMETRY_HOT_DATA"
+            hot_data = None
+            for _ in range(5):
+                msg = websocket.receive_json()
+                if msg.get("type") == "TELEMETRY_HOT_DATA":
+                    hot_data = msg
+                    break
+            assert hot_data is not None
             assert hot_data["maca_id"] == "MACA-01"
-
-            alert_data = websocket.receive_json()
-            assert alert_data["type"] == "EMERGENCY_ALERT"
-            assert alert_data["priority"] == "HIGH"

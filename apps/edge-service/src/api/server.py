@@ -457,3 +457,38 @@ def get_system_status(request: Request) -> dict[str, Any]:
         "acquisition_active": acq._is_running if acq else False,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/v1/calibration/model", tags=["Calibração"])
+def get_model_info(request: Request) -> dict[str, Any]:
+    """Retorna informações do modelo de peso ativo (Machine Learning ou Calibração Polinomial)."""
+    acq = _get_acq(request.app)
+    if not acq:
+        return {"model_type": "none", "ml_loaded": False}
+
+    ml_active = acq.ml_predictor.is_loaded
+    return {
+        "maca_id": MACA_ID,
+        "active_engine": "machine_learning" if ml_active else "polynomial_blocks",
+        "ml_loaded": ml_active,
+        "ml_metadata": acq.ml_predictor.metadata if ml_active else None,
+        "calib_valid": acq.calib.is_valid if acq.calib else False,
+    }
+
+
+@app.post("/api/v1/calibration/reload-model", tags=["Calibração"])
+def reload_model(request: Request) -> dict[str, Any]:
+    """Recarrega o modelo ML treinado e calibrações a quente (sem reiniciar o serviço)."""
+    acq = _get_acq(request.app)
+    if not acq:
+        return {"status": "error", "message": "AcquisitionWorker não disponível"}
+
+    reloaded = acq.ml_predictor.load()
+    return {
+        "status": "success" if reloaded else "fallback_polynomial",
+        "ml_loaded": reloaded,
+        "message": "Modelo ML recarregado com sucesso" if reloaded else "Modelo ML não encontrado, usando calibração padrão",
+        "metadata": acq.ml_predictor.metadata if reloaded else None,
+    }
+
+

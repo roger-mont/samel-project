@@ -1,6 +1,6 @@
 {
-  "maca_id": "MACA-001",
-  "sqlite_db_path": "D:\\PrOJETOS\\samel-project\\apps\\edge-service\\data\\edge_maca.db",
+  "maca_id": "MACA-LEITO-500",
+  "sqlite_db_path": "data/edge_maca.db",
   "max_retention_records": 50000,
   "retention_days": 7,
   "central_api_url": "",

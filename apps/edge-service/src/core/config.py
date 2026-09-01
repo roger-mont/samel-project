@@ -146,7 +146,11 @@ config_manager = ConfigManager()
 
 # Atalhos globais para compatibilidade com imports existentes
 MACA_ID: str = str(config_manager.get("maca_id", "MACA-EDGE-001"))
-SQLITE_DB_PATH: str = str(config_manager.get("sqlite_db_path", _DEFAULT_DB_PATH))
+_raw_db_path = str(config_manager.get("sqlite_db_path", _DEFAULT_DB_PATH))
+if _raw_db_path and not Path(_raw_db_path).is_absolute():
+    SQLITE_DB_PATH: str = str((_EDGE_ROOT / _raw_db_path).resolve())
+else:
+    SQLITE_DB_PATH: str = _raw_db_path
 MAX_RETENTION_RECORDS: int = int(config_manager.get("max_retention_records", 50000))
 RETENTION_DAYS: int = int(config_manager.get("retention_days", 7))
 CENTRAL_API_URL: str = str(config_manager.get("central_api_url", "http://central-server:8000"))
