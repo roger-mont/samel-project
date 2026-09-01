@@ -8,7 +8,7 @@
 
 ## 1. Escolha Tecnológica
 
-* **Banco de Dados Central:** **PostgreSQL 16+** com extensão opcional **TimescaleDB** (ou particionamento nativo por data).
+* **Banco de Dados Central:** **PostgreSQL 16+** com particionamento nativo por data.
 * **Justificativa:** Robustez ACID, suporte nativo a dados geoespaciais/matrizes (JSONB), particionamento de séries temporais de sensores e conformidade com requisitos hospitalares.
 
 ---

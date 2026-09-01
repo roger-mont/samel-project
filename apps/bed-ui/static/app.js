@@ -13,6 +13,7 @@
         statusDot: document.getElementById("system-status-dot"),
         statusText: document.getElementById("system-status-text"),
         statusChip: document.getElementById("system-status-chip"),
+        patientBed: document.getElementById("patient-bed"),
         patientWeightHeader: document.getElementById("patient-weight-header"),
 
         // KPIs
@@ -46,6 +47,11 @@
         alertTime: document.getElementById("alert-time"),
         sysCalibration: document.getElementById("sys-calibration"),
         summaryLimit: document.getElementById("summary-limit"),
+        eventsListContainer: document.getElementById("events-list-container"),
+        eventsCount: document.getElementById("events-count"),
+        summaryChanges: document.getElementById("summary-changes"),
+        summaryAvgTime: document.getElementById("summary-avg-time"),
+        summaryScore: document.getElementById("summary-score"),
     };
 
     /* --- State --- */
@@ -406,6 +412,23 @@
             }
         }
 
+        // Atualização Dinâmica nos Headers dos 3 Gráficos
+        if (DOM.chartLiveWeight) {
+            DOM.chartLiveWeight.textContent = `${weightKg.toFixed(1)} kg`;
+        }
+        if (DOM.chartLiveTime) {
+            DOM.chartLiveTime.textContent = `${Math.round(staticSecs / 60)} min`;
+        }
+        if (DOM.chartLivePosture && data.posture_info && data.posture_info.posture) {
+            const asym = data.posture_info.asymmetry_pct ? (data.posture_info.asymmetry_pct / 100).toFixed(2) : "0.00";
+            DOM.chartLivePosture.textContent = `${data.posture_info.posture} (${asym})`;
+        }
+
+        // Identificador da Maca no Cabeçalho
+        if (data.maca_id && DOM.patientBed) {
+            DOM.patientBed.textContent = data.maca_id;
+        }
+
         // Status de Conexão
         const isConnected = data.status === "conectado" || data.status === "connected" || !isEelAvailable;
         if (DOM.statusDot) {
@@ -446,7 +469,7 @@
         hideAlertOverlay();
     };
 
-    /* --- Chart.js Initialization & Mock Evolution Data --- */
+    /* --- Chart.js Initialization & Dynamic Data --- */
     function initCharts() {
         const timeLabels = ["-4h", "-3.5h", "-3h", "-2.5h", "-2h", "-1.5h", "-1h", "-30m", "Agora"];
 
@@ -459,17 +482,18 @@
                     labels: timeLabels,
                     datasets: [{
                         label: "Peso (kg)",
-                        data: [64.8, 64.7, 64.6, 64.5, 64.5, 64.6, 64.5, 64.5, 64.5],
+                        data: [null, null, null, null, null, null, null, null, 0],
                         borderColor: "#0d9488",
                         backgroundColor: "rgba(13, 148, 136, 0.08)",
                         borderWidth: 2,
                         fill: true,
                         tension: 0.3,
+                        spanGaps: true,
                         pointRadius: 2,
                         pointHoverRadius: 4,
                     }]
                 },
-                options: getCleanChartOptions(60, 70, "kg")
+                options: getCleanChartOptions(50, 90, "kg")
             });
         }
 
@@ -482,12 +506,13 @@
                     labels: timeLabels,
                     datasets: [{
                         label: "Índice de Variação",
-                        data: [0.02, 0.03, 0.85, 0.04, 0.03, 0.05, 0.78, 0.03, 0.04],
+                        data: [null, null, null, null, null, null, null, null, 0],
                         borderColor: "#0284c7",
                         backgroundColor: "rgba(2, 132, 199, 0.08)",
                         borderWidth: 2,
                         fill: true,
                         tension: 0.2,
+                        spanGaps: true,
                         pointRadius: 2,
                     }]
                 },
@@ -504,12 +529,13 @@
                     labels: timeLabels,
                     datasets: [{
                         label: "Tempo (min)",
-                        data: [15, 45, 10, 40, 58, 20, 10, 40, 18],
+                        data: [null, null, null, null, null, null, null, null, 0],
                         borderColor: "#10b981",
                         backgroundColor: "rgba(16, 185, 129, 0.08)",
                         borderWidth: 2,
                         fill: true,
                         tension: 0.3,
+                        spanGaps: true,
                         pointRadius: 2,
                     }]
                 },
@@ -525,7 +551,7 @@
                 data: {
                     labels: [1, 2, 3, 4, 5, 6, 7],
                     datasets: [{
-                        data: [12, 14, 13, 15, 14, 15, 14],
+                        data: [10, 10, 10, 10, 10, 10, 10],
                         borderColor: "#0d9488",
                         borderWidth: 1.8,
                         pointRadius: 0,
@@ -539,6 +565,113 @@
                     scales: { x: { display: false }, y: { display: false } }
                 }
             });
+        }
+    }
+
+    /* --- Funções de Busca e Atualização dos Painéis Analíticos --- */
+
+    async function fetchAndRenderCharts() {
+        if (isEelAvailable && window.eel && window.eel.get_dashboard_charts) {
+            try {
+                const chartsData = await window.eel.get_dashboard_charts(4)();
+                if (chartsData && chartsData.labels) {
+                    // 1. Gráfico de Peso
+                    if (chartWeightInstance && chartsData.weight_series) {
+                        chartWeightInstance.data.labels = chartsData.labels;
+                        chartWeightInstance.data.datasets[0].data = chartsData.weight_series;
+                        const validWeights = chartsData.weight_series.filter(v => v !== null && v !== undefined);
+                        if (validWeights.length > 0) {
+                            const minW = Math.max(0, Math.floor(Math.min(...validWeights) - 2));
+                            const maxW = Math.ceil(Math.max(...validWeights) + 2);
+                            chartWeightInstance.options.scales.y.min = minW;
+                            chartWeightInstance.options.scales.y.max = maxW;
+                            const latestW = validWeights[validWeights.length - 1];
+                            if (DOM.chartLiveWeight) DOM.chartLiveWeight.textContent = `${latestW.toFixed(1)} kg`;
+                        }
+                        chartWeightInstance.update("none");
+                    }
+
+                    // 2. Gráfico de Índice Postural
+                    if (chartPostureInstance && chartsData.posture_series) {
+                        chartPostureInstance.data.labels = chartsData.labels;
+                        chartPostureInstance.data.datasets[0].data = chartsData.posture_series;
+                        const validPos = chartsData.posture_series.filter(v => v !== null && v !== undefined);
+                        if (validPos.length > 0 && DOM.chartLivePosture) {
+                            const latestPos = validPos[validPos.length - 1];
+                            const statusLabel = latestPos < 0.15 ? "Estável" : "Assimetria";
+                            DOM.chartLivePosture.textContent = `${statusLabel} (${latestPos.toFixed(2)})`;
+                        }
+                        chartPostureInstance.update("none");
+                    }
+
+                    // 3. Gráfico de Tempo na Condição
+                    if (chartTimeInstance && chartsData.time_series) {
+                        chartTimeInstance.data.labels = chartsData.labels;
+                        chartTimeInstance.data.datasets[0].data = chartsData.time_series;
+                        const validTime = chartsData.time_series.filter(v => v !== null && v !== undefined);
+                        if (validTime.length > 0 && DOM.chartLiveTime) {
+                            const latestTime = validTime[validTime.length - 1];
+                            DOM.chartLiveTime.textContent = `${Math.round(latestTime)} min`;
+                        }
+                        chartTimeInstance.update("none");
+                    }
+                }
+            } catch (e) {
+                // Silencioso se backend reiniciar
+            }
+        }
+    }
+
+    async function fetchAndRenderEvents() {
+        if (isEelAvailable && window.eel && window.eel.get_dashboard_events) {
+            try {
+                const events = await window.eel.get_dashboard_events(5)();
+                if (DOM.eventsListContainer) {
+                    if (events && events.length > 0) {
+                        DOM.eventsListContainer.innerHTML = events.map(evt => `
+                            <li class="event-entry ${evt.level || ''}">
+                                <span class="event-time">${evt.time}</span>
+                                <span class="event-desc">${evt.description}</span>
+                            </li>
+                        `).join("");
+                        if (DOM.eventsCount) {
+                            DOM.eventsCount.textContent = `${events.length} registro${events.length > 1 ? 's' : ''}`;
+                        }
+                    } else {
+                        DOM.eventsListContainer.innerHTML = `
+                            <li class="event-empty" style="color: var(--samel-text-muted); font-size: 12px; padding: 12px 4px;">
+                                Nenhum evento recente registrado no leito.
+                            </li>
+                        `;
+                        if (DOM.eventsCount) {
+                            DOM.eventsCount.textContent = "0 registros";
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+    }
+
+    async function fetchAndRenderDailySummary() {
+        if (isEelAvailable && window.eel && window.eel.get_dashboard_summary) {
+            try {
+                const summary = await window.eel.get_dashboard_summary()();
+                if (summary) {
+                    if (DOM.summaryChanges && summary.total_rotations_today !== undefined) {
+                        DOM.summaryChanges.textContent = `${summary.total_rotations_today} rotaç${summary.total_rotations_today === 1 ? 'ão' : 'ões'}`;
+                    }
+                    if (DOM.summaryAvgTime && summary.avg_posture_time_min !== undefined) {
+                        DOM.summaryAvgTime.textContent = `${Math.round(summary.avg_posture_time_min)} min`;
+                    }
+                    if (DOM.summaryScore && summary.relief_score_pct !== undefined) {
+                        const score = summary.relief_score_pct;
+                        const label = score >= 90 ? "Ótimo" : (score >= 70 ? "Bom" : "Atenção");
+                        const color = score >= 90 ? "var(--samel-green)" : (score >= 70 ? "var(--samel-primary)" : "var(--samel-red)");
+                        DOM.summaryScore.textContent = `${score.toFixed(0)}% (${label})`;
+                        DOM.summaryScore.style.color = color;
+                    }
+                }
+            } catch (e) {}
         }
     }
 
@@ -627,7 +760,7 @@
 
     /* --- Calibration & Timeout Formatters --- */
     function formatCalibrationDate(isoStr) {
-        if (!isoStr) return "14/08/2026 às 16:10";
+        if (!isoStr) return "--";
         try {
             const d = new Date(isoStr);
             if (isNaN(d.getTime())) return isoStr;
@@ -649,53 +782,99 @@
         return `${mins} min`;
     }
 
-    /* --- Polling Loop --- */
+    /* --- Conexão WebSocket Direta ("Via Expressa") --- */
+    let telemetrySocket = null;
+    let isSocketConnected = false;
+
+    function connectWebSocket() {
+        const wsUrl = "ws://localhost:8000/ws/telemetry";
+        try {
+            telemetrySocket = new WebSocket(wsUrl);
+
+            telemetrySocket.onopen = function () {
+                isSocketConnected = true;
+                console.log("[WebSocket] Conectado à via expressa do Edge Service.");
+            };
+
+            telemetrySocket.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data && data.heatmap) {
+                        renderHeatmapMatrix(data.heatmap, 32, 64);
+                        updateKPIs(data);
+                    }
+                } catch (err) {
+                    console.error("[WebSocket] Erro no parsing:", err);
+                }
+            };
+
+            telemetrySocket.onclose = function () {
+                isSocketConnected = false;
+                console.warn("[WebSocket] Desconectado. Tentando reconexão em 2s...");
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            telemetrySocket.onerror = function () {
+                isSocketConnected = false;
+                try { telemetrySocket.close(); } catch (e) {}
+            };
+        } catch (e) {
+            isSocketConnected = false;
+            setTimeout(connectWebSocket, 2000);
+        }
+    }
+
+    /* --- Polling Loop (Apenas Fallback se WebSocket estiver desconectado) --- */
     async function pollSensorData() {
-        if (isEelAvailable && window.eel && window.eel.get_sensor_data) {
+        if (!isSocketConnected && isEelAvailable && window.eel && window.eel.get_sensor_data) {
             try {
                 const data = await window.eel.get_sensor_data()();
-                if (data) {
-                    renderHeatmapMatrix(data.heatmap, data.rows || 32, data.cols || 64);
+                if (data && data.heatmap && data.heatmap.length > 0) {
+                    renderHeatmapMatrix(data.heatmap, 32, 64);
                     updateKPIs(data);
-
-                    if (window.eel.get_calibration) {
-                        const calib = await window.eel.get_calibration()();
-                        if (calib) {
-                            if (calib.posture_timeout_seconds) {
-                                configuredTimeoutSec = calib.posture_timeout_seconds;
-                                const timeoutFormatted = formatTimeoutLimit(configuredTimeoutSec);
-                                if (DOM.kpiTimerLimit) DOM.kpiTimerLimit.textContent = timeoutFormatted;
-                                if (DOM.summaryLimit) DOM.summaryLimit.textContent = timeoutFormatted;
-                            }
-                            if (calib.calibrated_at && DOM.sysCalibration) {
-                                DOM.sysCalibration.textContent = formatCalibrationDate(calib.calibrated_at);
-                            }
-                        }
-                    }
-                    return;
                 }
-            } catch (err) {
-                // Em caso de falha no Eel, continua suavemente com o mock
-            }
+            } catch (err) {}
+        }
+    }
+
+    /* --- Carga Inicial de Configurações e Limites de Calibração --- */
+    async function loadSystemConfigAndCalibration() {
+        // 1. Carrega configurações do sistema (MACA_ID, URLs)
+        if (isEelAvailable && window.eel && window.eel.get_system_config) {
+            try {
+                const cfg = await window.eel.get_system_config()();
+                if (cfg && cfg.maca_id && DOM.patientBed) {
+                    DOM.patientBed.textContent = cfg.maca_id;
+                }
+            } catch (e) {}
+        } else {
+            try {
+                const res = await fetch("http://localhost:8000/api/v1/system/config");
+                if (res.ok) {
+                    const cfg = await res.json();
+                    if (cfg && cfg.maca_id && DOM.patientBed) {
+                        DOM.patientBed.textContent = cfg.maca_id;
+                    }
+                }
+            } catch (e) {}
         }
 
-        // Mock Loop dinâmico (quando standalone no browser ou aguardando hardware)
-        const mockMatrix = generateSyntheticPressureMatrix(32, 64);
-        renderHeatmapMatrix(mockMatrix, 32, 64);
-        updateKPIs({
-            weight_kg: 64.50,
-            is_locked: true,
-            stable_progress_pct: 100,
-            static_seconds: 1122 + Math.floor((Date.now() / 1000) % 60),
-            is_alert: false,
-            status: "conectado",
-        });
-
-        if (DOM.sysCalibration && (!DOM.sysCalibration.textContent || DOM.sysCalibration.textContent.includes("Hoje"))) {
-            DOM.sysCalibration.textContent = "14/08/2026 às 16:10";
-        }
-        if (DOM.summaryLimit) {
-            DOM.summaryLimit.textContent = formatTimeoutLimit(configuredTimeoutSec);
+        // 2. Carrega calibração e timeout de postura
+        if (isEelAvailable && window.eel && window.eel.get_calibration) {
+            try {
+                const calib = await window.eel.get_calibration()();
+                if (calib) {
+                    if (calib.posture_timeout_seconds) {
+                        configuredTimeoutSec = calib.posture_timeout_seconds;
+                        const timeoutFormatted = formatTimeoutLimit(configuredTimeoutSec);
+                        if (DOM.kpiTimerLimit) DOM.kpiTimerLimit.textContent = timeoutFormatted;
+                        if (DOM.summaryLimit) DOM.summaryLimit.textContent = timeoutFormatted;
+                    }
+                    if (calib.calibrated_at && DOM.sysCalibration) {
+                        DOM.sysCalibration.textContent = formatCalibrationDate(calib.calibrated_at);
+                    }
+                }
+            } catch (e) {}
         }
     }
 
@@ -744,11 +923,167 @@
         }
     }
 
+    /* --- Modal de Configurações Técnicas --- */
+    function setupConfigModal() {
+        const btnOpen = document.getElementById("btn-open-config");
+        const btnClose = document.getElementById("btn-close-config");
+        const btnCancel = document.getElementById("btn-cancel-config");
+        const btnSave = document.getElementById("btn-save-config");
+        const overlay = document.getElementById("config-modal-overlay");
+        const statusMsg = document.getElementById("config-save-status");
+
+        const inputMacaId = document.getElementById("input-config-maca-id");
+        const inputCentralUrl = document.getElementById("input-config-central-url");
+        const inputSyncInterval = document.getElementById("input-config-sync-interval");
+        const inputTimeoutMin = document.getElementById("input-config-timeout-min");
+
+        async function openModal() {
+            if (!overlay) return;
+            overlay.classList.remove("hidden");
+            if (statusMsg) statusMsg.classList.add("hidden");
+
+            // Carrega valores atuais
+            let cfg = null;
+            if (isEelAvailable && window.eel && window.eel.get_system_config) {
+                try {
+                    cfg = await window.eel.get_system_config()();
+                } catch (e) {}
+            }
+            if (!cfg) {
+                try {
+                    const res = await fetch("http://localhost:8000/api/v1/system/config");
+                    if (res.ok) cfg = await res.json();
+                } catch (e) {}
+            }
+
+            if (cfg) {
+                if (inputMacaId && cfg.maca_id) inputMacaId.value = cfg.maca_id;
+                if (inputCentralUrl && cfg.central_api_url) inputCentralUrl.value = cfg.central_api_url;
+                if (inputSyncInterval && cfg.sync_interval_sec) inputSyncInterval.value = cfg.sync_interval_sec;
+            }
+
+            if (inputTimeoutMin) {
+                inputTimeoutMin.value = Math.round(configuredTimeoutSec / 60);
+            }
+        }
+
+        function closeModal() {
+            if (overlay) overlay.classList.add("hidden");
+        }
+
+        async function saveConfig() {
+            if (!btnSave) return;
+            btnSave.disabled = true;
+            btnSave.textContent = "Salvando...";
+
+            const payload = {
+                maca_id: inputMacaId && inputMacaId.value.trim() ? inputMacaId.value.trim() : undefined,
+                central_api_url: inputCentralUrl && inputCentralUrl.value.trim() ? inputCentralUrl.value.trim() : undefined,
+                sync_interval_sec: inputSyncInterval && inputSyncInterval.value ? parseFloat(inputSyncInterval.value) : undefined,
+            };
+
+            const timeoutMins = inputTimeoutMin && inputTimeoutMin.value ? parseInt(inputTimeoutMin.value, 10) : 60;
+            const timeoutSecs = timeoutMins * 60;
+
+            try {
+                let savedOk = false;
+
+                // 1. Tenta salvar via Eel
+                if (isEelAvailable && window.eel && window.eel.save_system_config) {
+                    try {
+                        const res = await window.eel.save_system_config(payload)();
+                        if (res && res.status === "ok") savedOk = true;
+                    } catch (e) {}
+                }
+
+                // 2. Se Eel não confirmou, tenta via REST direto
+                if (!savedOk) {
+                    try {
+                        const res = await fetch("http://localhost:8000/api/v1/system/config", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload),
+                        });
+                        if (res.ok) savedOk = true;
+                    } catch (e) {}
+                }
+
+                // 3. Atualiza timeout postural
+                if (isEelAvailable && window.eel && window.eel.update_calibration) {
+                    try {
+                        await window.eel.update_calibration("posture_timeout_seconds", timeoutSecs)();
+                    } catch (e) {}
+                } else {
+                    try {
+                        await fetch("http://localhost:8000/api/v1/calibration/params", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ param_name: "posture_timeout_seconds", value: timeoutSecs }),
+                        });
+                    } catch (e) {}
+                }
+
+                // 4. Atualiza UI local
+                if (payload.maca_id && DOM.patientBed) {
+                    DOM.patientBed.textContent = payload.maca_id;
+                }
+
+                configuredTimeoutSec = timeoutSecs;
+                const timeoutFormatted = formatTimeoutLimit(configuredTimeoutSec);
+                if (DOM.kpiTimerLimit) DOM.kpiTimerLimit.textContent = timeoutFormatted;
+                if (DOM.summaryLimit) DOM.summaryLimit.textContent = timeoutFormatted;
+
+                if (statusMsg) {
+                    statusMsg.textContent = "Configurações salvas e aplicadas com sucesso!";
+                    statusMsg.className = "config-status-msg success";
+                    statusMsg.classList.remove("hidden");
+                }
+
+                setTimeout(closeModal, 1000);
+            } catch (err) {
+                if (statusMsg) {
+                    statusMsg.textContent = "Erro ao salvar: " + err;
+                    statusMsg.className = "config-status-msg error";
+                    statusMsg.classList.remove("hidden");
+                }
+            } finally {
+                btnSave.disabled = false;
+                btnSave.textContent = "Salvar e Aplicar";
+            }
+        }
+
+        if (btnOpen) btnOpen.addEventListener("click", openModal);
+        if (btnClose) btnClose.addEventListener("click", closeModal);
+        if (btnCancel) btnCancel.addEventListener("click", closeModal);
+        if (btnSave) btnSave.addEventListener("click", saveConfig);
+    }
+
     /* --- Inicialização do Dashboard --- */
     function init() {
         initCharts();
         setupChartsToggle();
-        setInterval(pollSensorData, 80); // ~12-15 FPS para performance fluida
+        setupConfigModal();
+
+        // 1. Inicia conexão WebSocket em tempo real
+        connectWebSocket();
+
+        // 2. Carrega configurações do sistema e limites de calibração uma única vez
+        loadSystemConfigAndCalibration();
+
+        // 3. Polling de fallback (apenas se WebSocket cair)
+        setInterval(pollSensorData, 500);
+
+        // 4. Polling dos gráficos analíticos (a cada 10s)
+        fetchAndRenderCharts();
+        setInterval(fetchAndRenderCharts, 10000);
+
+        // 5. Polling dos eventos recentes (a cada 10s)
+        fetchAndRenderEvents();
+        setInterval(fetchAndRenderEvents, 10000);
+
+        // 6. Polling do resumo do dia civil (a cada 15s)
+        fetchAndRenderDailySummary();
+        setInterval(fetchAndRenderDailySummary, 15000);
     }
 
     if (document.readyState === "loading") {

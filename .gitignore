@@ -10,9 +10,18 @@ venv/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Runtime artifacts
-Python/tare.json
-tare.json
+# Testes e cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Banco de dados e logs locais Edge
+apps/edge-service/data/*.db
+apps/edge-service/data/*.db-wal
+apps/edge-service/data/*.db-shm
+apps/edge-service/data/*.db-journal
+
+# Backups e artefatos de calibração
 .calib_backup
 calib_backup/
 calib_backup
@@ -22,6 +31,3 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
-
-# Backups
-calib_backup/

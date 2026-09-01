@@ -1,0 +1,6 @@
+# data/ — Diretório persistente do SQLite Edge
+# Ignorar o conteúdo mas manter a pasta no versionamento
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

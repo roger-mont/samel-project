@@ -1,0 +1,11 @@
+{
+  "_comment": "Arquivo de Configuração do Samel Edge Service (Maca Hospitalar)",
+  "maca_id": "MACA-UTI-01",
+  "central_api_url": "http://192.168.1.100:8000",
+  "edge_api_token": "samel_secret_token_123",
+  "sync_interval_sec": 60,
+  "sync_batch_size": 50,
+  "retention_days": 7,
+  "max_retention_records": 50000,
+  "log_level": "INFO"
+}

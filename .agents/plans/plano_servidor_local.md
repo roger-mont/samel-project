@@ -43,6 +43,7 @@ O sistema adota o padrão **Edge + Sync (Store-and-Forward)** para garantir disp
 * **Daemon de Sincronização (`sync_worker.py`):**
   * Consome a fila de eventos do SQLite local.
   * Agrupa em batches de 50 registros.
+  * A cada 1 minuto envia os dados para o servidor central.
   * Transmite para o servidor central com autenticação por token (JWT/API Key).
   * Marca registros como `synced = 1` apenas após `HTTP 200 OK` do servidor central.
 
@@ -60,6 +61,8 @@ O sistema adota o padrão **Edge + Sync (Store-and-Forward)** para garantir disp
 2. **Buffer Offline Infinito (Store-and-Forward):**
    * Se o Wi-Fi hospitalar oscilar ou cair, a maca continua gravando no SQLite local sem travar ou gerar latência para o usuário.
    * Assim que o link de rede restabelece, o daemon descarrega o histórico acumulado no servidor central.
+   * A tabela local deve ter o limite de data para 7 dias
+   * Quando o limite de tempo for atingido, a inserção de um novo registro deve apagar o registro mais antigo
 3. **Watchdog de Serviço (Systemd / Docker):**
    * Configuração `Restart=always` e `RestartSec=3s` no serviço do sistema operacional para recuperação automática de processos.
 

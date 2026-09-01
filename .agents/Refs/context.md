@@ -1,6 +1,6 @@
 # Contexto e Arquitetura do Projeto: Manta de Sensores FSR (WangYing)
 
-Este documento resume as especificações reais de hardware, a modelagem físico-matemática e os requisitos de software do sistema de monitoramento de pressão e peso em maca hospitalar.
+Este documento resume as especificações reais de hardware, a modelagem físico-matemática, os requisitos clínicos e as decisões arquiteturais do sistema de monitoramento de pressão, peso e prevenção de Lesões por Pressão (LPP) em maca hospitalar.
 
 ---
 
@@ -16,7 +16,7 @@ O sistema utiliza uma manta hospitalar com matriz de Force Sensing Resistors (FS
 
 ---
 
-## 2. Modelagem Matemática (Backend Python)
+## 2. Modelagem Matemática (Pipeline Numérico)
 
 Como o protocolo HID entrega intensidades 0–255 diretamente, o pipeline aplica processamento vetorizado com **NumPy/SciPy**:
 
@@ -38,7 +38,10 @@ Como o protocolo HID entrega intensidades 0–255 diretamente, o pipeline aplica
 4.  **Suavização Temporal (EMA):**
     $$m_{EMA}(t) = \alpha \cdot m_{física}(t) + (1 - \alpha) \cdot m_{EMA}(t-1)$$
 
-5.  **Critério de Estabilidade e Weight Lock (Metodologia §13):**
+5.  **Média Móvel Inteligente de 60s com Reset Rápido:**
+    Para garantir precisão metrológica, o peso é acumulado em janela deslizante de 60 segundos. Se um degrau $> 2,0 \text{ kg}$ for detectado (ex: entrada/saída de paciente ou colocação de equipamento), o buffer é zerado instantaneamente para estabilização imediata.
+
+6.  **Critério de Estabilidade e Weight Lock (Metodologia §13):**
     O peso é considerado estável e travado quando preenche simultaneamente:
     *   $|m(t) - m(t-\Delta t)| < \epsilon$ ($\epsilon = 0,3 \text{ kg}$)
     *   $\text{variância}(\text{janela}) < 0,25 \text{ kg}^2$
@@ -47,22 +50,44 @@ Como o protocolo HID entrega intensidades 0–255 diretamente, o pipeline aplica
 
 ---
 
-## 3. Regras de Negócio e Monitoramento Clínico
+## 3. Gestão Centralizada de Configuração para Produção
 
-*   **Tara Dinâmica:** Capacidade de zerar a leitura base com colchão e lençol instalados (persistido em `tare.json`).
-*   **Monitoramento de Postura Estática (Alerta de Escaras):** O sistema monitora continuamente o centro de pressão e distribuição da carga. Se o paciente permanecer na mesma postura por período superior ao timeout configurado (padrão: 60 s), dispara um alerta visual de redistribuição de pressão.
-*   **Log Metrológico de Calibração:** Registro estruturado em CSV de cada ensaio experimental conforme a Metodologia §11 (pasta `sessions/`).
+Para garantir fácil manutenção no hospital, o sistema adota um **ConfigManager com busca em cascata**:
+
+1.  **Prioridade 1: Variáveis de Ambiente do SO / Processo.**
+2.  **Prioridade 2: `config.json` local ou apontado por `SAMEL_CONFIG_PATH`.**
+3.  **Prioridade 3: `C:\ProgramData\Samel\config.json` (Padrão de Produção Windows).**
+4.  **Prioridade 4: `.env`.**
+5.  **Prioridade 5: Valores padrão seguros em código.**
+
+### Modos de Configuração Disponíveis:
+*   **Via Tela do Totem (Modal Técnico):** A equipe médica/técnica altera o ID do leito e IP do servidor direto na interface via `POST /api/v1/system/config`.
+*   **Via Assistente Interativo:** Script [`scripts/configurar_maca.bat`](file:///d:/PrOJETOS/samel-project/scripts/configurar_maca.bat).
+*   **Via Arquivo Texto:** Edição no Bloco de Notas em `config.json`.
 
 ---
 
-## 4. Arquitetura de Software
+## 4. Arquitetura de Software (Aquisição 24/7 no Edge Service)
 
-*   **Backend:** Python 3.10+ (`/Python`).
-*   **Comunicação Frontend:** Ponte bidirecional via **Eel (Webview / Chromium)** com API REST e WebSocket para integração com sistemas externos.
-*   **Componentes da UI:**
-    *   Mapa de calor (*Heatmap*) 32×64 renderizado via HTML5 Canvas com interpolação espectral.
-    *   Card de Peso com exibição de Leitura Atual, Força em Newtons e Peso Estável Travado (destaque verde).
-    *   Barra de progresso de estabilização em tempo real.
-    *   Cronômetro de postura com barra de timeout e alerta modal de redistribuição.
-    *   Painel de ajuste de parâmetros em runtime (Deadzone, EMA Alpha, Tolerância e Timeout de Postura).
-    *   Controles de Tara (aplicar/remover).
+O sistema opera em **dois módulos desacoplados nativamente no Windows**:
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        MACA HOSPITALAR (WINDOWS)                       │
+│                                                                        │
+│  ┌─────────────────────────┐          ┌─────────────────────────────┐  │
+│  │   apps/bed-ui           │          │ apps/edge-service           │  │
+│  │   (Visualizador Kiosk)  │WebSocket │ (Serviço do Windows 24/7)   │  │
+│  │  - Interface HTML5/JS   │◀────────▶│ - Leitura USB HID WangYing  │  │
+│  │  - Renderiza Heatmap    │  REST    │ - Pipeline NumPy e Física   │  │
+│  │  - Modal de Configuração│          │ - SQLite WAL (FIFO 7 dias)  │  │
+│  │  - Pode abrir e fechar  │          │ - Store-and-Forward Daemon  │  │
+│  └─────────────────────────┘          └──────────────┬──────────────┘  │
+└──────────────────────────────────────────────────────┼─────────────────┘
+                                                       │ Store-and-Forward
+                                                       ▼ (Batches a cada 60s)
+                                     ┌───────────────────────────────────┐
+                                     │  Servidor Central / UTI / Nuvem   │
+                                     │  (PostgreSQL / TimescaleDB)       │
+                                     └───────────────────────────────────┘
+```
