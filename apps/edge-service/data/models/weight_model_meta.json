@@ -1,5 +1,5 @@
 {
-  "model_name": "Ridge Linear",
+  "model_name": "Huber Regressor (Robusto a Outliers)",
   "features": [
     "B1",
     "B2",
@@ -25,10 +25,10 @@
     "sqrt_B7",
     "sqrt_B8"
   ],
-  "total_samples": 543,
+  "total_samples": 36731,
   "min_weight_kg": 0.1,
-  "max_weight_kg": 11.2,
-  "cv_mae_kg": 0.8316,
-  "cv_rmse_kg": 1.0258,
-  "cv_r2": 0.5428
+  "max_weight_kg": 88.9,
+  "cv_mae_kg": 5.8724,
+  "cv_rmse_kg": 8.4966,
+  "cv_r2": 0.9035
 }
