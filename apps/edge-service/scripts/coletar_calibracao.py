@@ -171,8 +171,13 @@ def salvar_sessao(
     repeticao: int,
     frames_registrados: list[dict],
     duracao_s: float,
+    direction: str = "UP",
+    cycle_id: int = 1,
+    baseline_raw: float = 0.0,
+    block_id: int = 0,
+    cell_id: str = "all",
 ) -> tuple[Path, int]:
-    """Salva todos os frames da sessão no formato calib_wide_YYYYMMDD.csv."""
+    """Salva frames da sessão no formato calib_wide_YYYYMMDD.csv com metadados de histerese."""
     sessions_dir.mkdir(parents=True, exist_ok=True)
     hoje_str = datetime.now(timezone.utc).strftime("%Y%m%d")
     csv_path = sessions_dir / f"calib_wide_{hoje_str}.csv"
@@ -184,6 +189,15 @@ def salvar_sessao(
         "peso_real_kg",
         "posicao",
         "repeticao",
+        "direction",
+        "cycle_id",
+        "stable",
+        "stabilization_time_s",
+        "baseline_raw",
+        "raw_mean",
+        "raw_std",
+        "block_id",
+        "cell_id",
         "B1",
         "B2",
         "B3",
@@ -202,6 +216,11 @@ def salvar_sessao(
     session_uuid = str(uuid.uuid4())
     linhas_gravadas = 0
 
+    somas = [f["soma_total"] for f in frames_registrados]
+    raw_mean = float(np.mean(somas)) if somas else 0.0
+    raw_std = float(np.std(somas)) if len(somas) > 1 else 0.0
+    is_stable = raw_std <= 25.0
+
     with csv_path.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if novo:
@@ -211,14 +230,23 @@ def salvar_sessao(
             row = [
                 datetime.now(timezone.utc).astimezone().isoformat(),
                 session_uuid,
-                "2.0.0",
+                "2.1.0",
                 round(peso_real_kg, 4),
                 posicao,
                 repeticao,
+                direction.upper(),
+                cycle_id,
+                is_stable,
+                round(duracao_s, 2),
+                round(baseline_raw, 4),
+                round(raw_mean, 4),
+                round(raw_std, 4),
+                block_id,
+                cell_id,
                 *(round(float(b), 4) for b in frame["b_vals"]),
                 round(frame["soma_total"], 4),
                 frame["tempo_s"],
-                1,
+                1 if is_stable else 0,
                 0.0,
             ]
             writer.writerow(row)
@@ -313,10 +341,17 @@ def main() -> None:
             repeticao = rep_counters.get(rep_key, 0) + 1
             print(f"  -> Repetição: #{repeticao} (detectada automaticamente)")
 
+            # Sentido do ciclo e ID para histerese
+            dir_opcao = input("Direção da carga [1=UP (subida), 2=DOWN (descida), padrão 1]: ").strip() or "1"
+            direction = "DOWN" if dir_opcao == "2" else "UP"
+
+            ciclo_str = input("Número do ciclo independente [padrão 1]: ").strip() or "1"
+            cycle_id = int(ciclo_str) if ciclo_str.isdigit() else 1
+
             dur_str = input("Tempo de amostragem em segundos [padrão 15s]: ").strip() or "15"
             duracao = float(dur_str) if dur_str.replace(".", "").isdigit() else 15.0
 
-            input("\n-> Posicione a carga na maca e pressione ENTER para iniciar a medição...")
+            input(f"\n-> Posicione {peso_kg} kg ({direction}) na maca e pressione ENTER para iniciar...")
 
             frames_registrados, b_medias, soma_media = coletar_amostra(dev, duracao, is_tare=False)
 
@@ -324,7 +359,7 @@ def main() -> None:
                 print("[!] Nenhum dado detectado. Verifique se o peso foi posicionado.")
                 continue
 
-            print(f"\nResultados médios obtidos para {peso_kg} kg ({posicao}) - Repetição #{repeticao}:")
+            print(f"\nResultados obtidos para {peso_kg} kg ({posicao}) [{direction}] - Ciclo #{cycle_id} Rep #{repeticao}:")
             for i, b_val in enumerate(b_medias):
                 print(f"  B{i+1}: {b_val:7.1f}", end="  " if (i + 1) % 4 != 0 else "\n")
             print(f"  Soma Média: {soma_media:.1f}")
@@ -332,10 +367,17 @@ def main() -> None:
             conf = input(f"\nDeseja salvar este ensaio ({len(frames_registrados)} frames)? (S/n): ").strip().lower()
             if conf in ("", "s", "sim", "y", "yes"):
                 arquivo_salvo, total_f = salvar_sessao(
-                    sessions_dir, peso_kg, posicao, repeticao, frames_registrados, duracao
+                    sessions_dir,
+                    peso_kg,
+                    posicao,
+                    repeticao,
+                    frames_registrados,
+                    duracao,
+                    direction=direction,
+                    cycle_id=cycle_id,
                 )
                 rep_counters[rep_key] = repeticao
-                print(f"[✓] {total_f} frames registrados com sucesso (Repetição #{repeticao}) em: {arquivo_salvo.name}")
+                print(f"[✓] {total_f} frames gravados com sucesso (Ciclo #{cycle_id}, {direction}) em: {arquivo_salvo.name}")
 
     finally:
         dev.close()

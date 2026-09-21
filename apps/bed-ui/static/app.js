@@ -362,16 +362,31 @@
         if (DOM.kpiWeightVal) DOM.kpiWeightVal.textContent = weightKg.toFixed(2);
         if (DOM.patientWeightHeader) DOM.patientWeightHeader.textContent = `${weightKg.toFixed(2)} kg`;
 
+        const stateId = data.state_id || (isLocked ? "CARGA ESTAVEL" : "ESTABILIZANDO");
+        const stateLabel = data.state_label || "";
+
         if (DOM.kpiStabilityFill) {
             DOM.kpiStabilityFill.style.width = `${Math.min(100, Math.max(0, progressPct))}%`;
-            if (isLocked) {
+            if (stateId === "CARGA ESTAVEL" || isLocked) {
                 DOM.kpiStabilityFill.classList.add("locked");
                 DOM.kpiStabilityText.textContent = "Estabilidade: 100%";
-                DOM.kpiStabilityStatus.textContent = "Estável ✓";
+                DOM.kpiStabilityStatus.textContent = "Medição Estável ✓";
+                DOM.kpiStabilityStatus.style.color = "var(--samel-teal-dark)";
+            } else if (stateId === "CARREGANDO/MOVIMENTO") {
+                DOM.kpiStabilityFill.classList.remove("locked");
+                DOM.kpiStabilityText.textContent = "Aguardando estabilização...";
+                DOM.kpiStabilityStatus.textContent = "Paciente em Movimento ⚠️";
+                DOM.kpiStabilityStatus.style.color = "var(--samel-amber)";
+            } else if (stateId === "SEM CARGA") {
+                DOM.kpiStabilityFill.classList.remove("locked");
+                DOM.kpiStabilityText.textContent = "Leito Desocupado";
+                DOM.kpiStabilityStatus.textContent = "Sem Carga";
+                DOM.kpiStabilityStatus.style.color = "var(--samel-gray-500)";
             } else {
                 DOM.kpiStabilityFill.classList.remove("locked");
                 DOM.kpiStabilityText.textContent = `Estabilizando: ${Math.round(progressPct)}%`;
-                DOM.kpiStabilityStatus.textContent = "Em leitura...";
+                DOM.kpiStabilityStatus.textContent = "Estabilizando...";
+                DOM.kpiStabilityStatus.style.color = "var(--samel-blue)";
             }
         }
 

@@ -30,6 +30,14 @@ STABILITY_WINDOW_SIZE: int = 40         # frames na janela de variância/drift
 WEIGHT_WINDOW_SECONDS: float = 60.0    # janela de média móvel contínua (1 minuto)
 FAST_RESET_THRESHOLD_KG: float = 2.0   # degrau que aciona reset imediato do buffer móvel
 
+# Critérios da Máquina de Estados e Decisão de Leitura (Documento Atividades do Roger)
+STABILITY_EPSILON_RAW: float = 25.0       # tolerância epsilon em D(t) = |s_bar(t) - s_bar(t-Dt)|
+STABILITY_SIGMA_MAX: float = 15.0         # desvio padrão máximo sigma_max
+STABILITY_DEFAULT_TMIN_S: float = 15.0    # tempo mínimo contínuo padrão (s)
+STABILITY_TEST_WINDOWS_S: tuple[float, ...] = (10.0, 20.0, 30.0, 45.0, 60.0)
+MOTION_DMAX_MATRIX: float = 250.0         # Dmax diferencial para movimento na matriz 32x64
+EMPTY_BED_MAX_RAW_SUM: float = 60.0       # soma máxima para leito considerado sem carga
+
 
 @dataclass
 class CalibrationParams:
@@ -39,6 +47,9 @@ class CalibrationParams:
     ema_alpha: float = 0.5               # suavização exponencial do peso total
     posture_tolerance: float = 0.15       # tolerância de assimetria postural
     posture_timeout_seconds: int = 3600  # tempo máximo sem rotação (60 min)
+    stability_tmin_seconds: float = 15.0 # tempo mínimo para confirmação estável
+    motion_dmax_matrix: float = 250.0    # limiar diferencial de movimento matricial
+    stability_epsilon_raw: float = 25.0  # limiar epsilon para derivada temporal
     _lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,

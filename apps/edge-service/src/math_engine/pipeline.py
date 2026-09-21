@@ -5,11 +5,22 @@ import logging
 import numpy as np
 
 from core.settings import CalibrationParams
+from math_engine.mat_baseline_compensator import MatBaselineCompensator
 from math_engine.ml_weight import MLWeightPredictor
 from math_engine.spatial_features import compute_cop_2d
 from storage.calibration_store import CalibData, GRAVITY_M_S2
 
 logger = logging.getLogger(__name__)
+
+
+def correct_baseline(
+    raw_matrix: np.ndarray,
+    baseline_compensator: MatBaselineCompensator | None = None,
+) -> np.ndarray:
+    """Subtrai baseline matricial B(t): sc(t) = max(0, s(t) - B(t))."""
+    if baseline_compensator is None:
+        return raw_matrix
+    return baseline_compensator.correct_frame(raw_matrix)
 
 
 def compute_force_matrix(

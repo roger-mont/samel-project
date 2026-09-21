@@ -43,6 +43,23 @@ def carregar_dataset(sessions_dir: Path) -> pd.DataFrame:
     return df
 
 
+def particionar_datasets_metrologicos(
+    df: pd.DataFrame,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Divide o dataset em Dcal (60%), Dval (20%) e Dblind (20%) conforme diretrizes."""
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(len(df))
+    n_cal = int(0.60 * len(df))
+    n_val = int(0.20 * len(df))
+
+    cal_idx = indices[:n_cal]
+    val_idx = indices[n_cal : n_cal + n_val]
+    blind_idx = indices[n_cal + n_val :]
+
+    return df.iloc[cal_idx].copy(), df.iloc[val_idx].copy(), df.iloc[blind_idx].copy()
+
+
 def extrair_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     """Gera features estatísticas, espaciais e não-lineares a partir das leituras B1-B8."""
     blocos = [f"B{i}" for i in range(1, 9)]
@@ -186,50 +203,71 @@ def main() -> None:
 
     print("=" * 65)
     print(" PIPELINE DE MACHINE LEARNING — CALIBRAÇÃO E PREDIÇÃO DE PESO")
+    print(" (Metodologia com Separação Estrita: Dcal, Dval, Dblind)")
     print("=" * 65)
 
     df = carregar_dataset(sessions_dir)
-    n_sessoes = df["session_id"].nunique() if "session_id" in df.columns else 1
-    print(f"-> Base de dados carregada: {len(df)} frames distribuídos em {n_sessoes} ensaios.")
-    print(f"-> Faixa de peso coberta: {df['peso_real_kg'].min():.2f} kg a {df['peso_real_kg'].max():.2f} kg")
+    d_cal, d_val, d_blind = particionar_datasets_metrologicos(df)
+    print(f"-> Base total: {len(df)} frames | Dcal: {len(d_cal)} | Dval: {len(d_val)} | Dblind: {len(d_blind)}")
+    print(f"-> Faixa de peso: {df['peso_real_kg'].min():.2f} kg a {df['peso_real_kg'].max():.2f} kg")
 
-    X, y = extrair_features(df)
-    print(f"-> Features geradas: {X.shape[1]} variáveis de entrada.\n")
+    X_cal, y_cal = extrair_features(d_cal)
+    X_val, y_val = extrair_features(d_val)
+    X_blind, y_blind = extrair_features(d_blind)
 
-    print(f"{'Modelo':<35} | {'MAE (kg)':<10} | {'RMSE (kg)':<10} | {'R²':<8}")
+    print(f"{'Modelo':<35} | {'MAE Val':<10} | {'RMSE Val':<10} | {'R² Val':<8}")
     print("-" * 72)
 
-    groups = df["session_id"] if "session_id" in df.columns else None
-    resultados = avaliar_modelos_cv(X, y, groups=groups, n_splits=5)
+    groups = d_cal["session_id"] if "session_id" in d_cal.columns else None
+    resultados_cal = avaliar_modelos_cv(X_cal, y_cal, groups=groups, n_splits=5)
 
     melhor_nome = ""
-    menor_rmse = float("inf")
+    menor_rmse_val = float("inf")
 
-    for nome, res in sorted(resultados.items(), key=lambda item: item[1]["rmse_medio"]):
-        print(f"{nome:<35} | {res['mae_medio']:<10.3f} | {res['rmse_medio']:<10.3f} | {res['r2_medio']:<8.4f}")
-        if res["rmse_medio"] < menor_rmse:
-            menor_rmse = res["rmse_medio"]
+    for nome, res in sorted(resultados_cal.items(), key=lambda item: item[1]["rmse_medio"]):
+        m_obj = res["modelo_obj"]
+        m_obj.fit(X_cal, y_cal)
+        preds_val = m_obj.predict(X_val)
+        mae_v = float(mean_absolute_error(y_val, preds_val))
+        rmse_v = float(root_mean_squared_error(y_val, preds_val))
+        r2_v = float(r2_score(y_val, preds_val)) if len(y_val) > 1 else 1.0
+
+        print(f"{nome:<35} | {mae_v:<10.3f} | {rmse_v:<10.3f} | {r2_v:<8.4f}")
+        if rmse_v < menor_rmse_val:
+            menor_rmse_val = rmse_v
             melhor_nome = nome
 
-    # Treina o modelo campeão com 100% dos dados para produção
-    print("\n" + "=" * 65)
-    print(f"-> Modelo Campeão: {melhor_nome} (RMSE Médio: {menor_rmse:.3f} kg)")
-    campeao = resultados[melhor_nome]["modelo_obj"]
-    campeao.fit(X, y)
+    # Avaliação final no conjunto cego Dblind
+    campeao = resultados_cal[melhor_nome]["modelo_obj"]
+    campeao.fit(X_cal, y_cal)
+    preds_blind = campeao.predict(X_blind)
+    mae_blind = float(mean_absolute_error(y_blind, preds_blind))
+    rmse_blind = float(root_mean_squared_error(y_blind, preds_blind))
 
-    # Exporta artefatos
+    print("\n" + "=" * 65)
+    print(f"-> Modelo Selecionado (Dval): {melhor_nome}")
+    print(f"-> Teste Cego Dblind: MAE={mae_blind:.3f} kg | RMSE={rmse_blind:.3f} kg")
+    print("=" * 65)
+    print("[!] DIRETRIZ METROLÓGICA (Atividades do Roger):")
+    print("    A curva definitiva m = f(s) NÃO deve ser fechada para produção")
+    print("    até a incorporação dos novos dados de 0–100 g (Tiago e Fabrício).")
+    print("=" * 65)
+
+    # Exporta modelo experimental com metadados detalhados
     joblib_path = models_dir / "weight_model.joblib"
     joblib.dump(campeao, joblib_path)
 
     meta = {
         "model_name": melhor_nome,
-        "features": list(X.columns),
+        "status": "experimental_aguardando_dados_0_100g",
+        "features": list(X_cal.columns),
         "total_samples": len(df),
-        "min_weight_kg": float(df["peso_real_kg"].min()),
-        "max_weight_kg": float(df["peso_real_kg"].max()),
-        "cv_mae_kg": round(resultados[melhor_nome]["mae_medio"], 4),
-        "cv_rmse_kg": round(resultados[melhor_nome]["rmse_medio"], 4),
-        "cv_r2": round(resultados[melhor_nome]["r2_medio"], 4),
+        "d_cal_samples": len(d_cal),
+        "d_val_samples": len(d_val),
+        "d_blind_samples": len(d_blind),
+        "val_rmse_kg": round(menor_rmse_val, 4),
+        "blind_mae_kg": round(mae_blind, 4),
+        "blind_rmse_kg": round(rmse_blind, 4),
     }
 
     meta_path = models_dir / "weight_model_meta.json"

@@ -18,8 +18,13 @@ from core.settings import (
 from database.db_local import LocalDatabase
 from hardware.serial_reader import BaseFrameReader, HidFrameReader, FakeSerialReader
 from math_engine.creep_compensator import CreepCompensator, AutoReZero
+from math_engine.mat_baseline_compensator import MatBaselineCompensator
 from math_engine.ml_weight import MLWeightPredictor
-from math_engine.pipeline import compute_force_matrix, compute_total_mass, compute_total_force, compute_cop, apply_ema
+from math_engine.pipeline import (
+    compute_force_matrix, compute_total_mass, compute_total_force,
+    compute_cop, apply_ema, correct_baseline,
+)
+from math_engine.reading_stability_detector import ReadingStabilityDetector, ReadingState
 from providers.posture_monitor import PostureMonitor
 from storage.calibration_store import CalibData, load_calibration
 from storage.tare_store import load_tare, save_tare
@@ -29,6 +34,23 @@ logger = logging.getLogger(__name__)
 _STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
 _CALIB_PATH = _STORAGE_DIR / "calibration.json"
 _TARE_PATH = _STORAGE_DIR / "tare.json"
+_BASELINE_PATH = _STORAGE_DIR / "baseline_raw.json"
+
+
+def _resolve_display_weight(
+    state: ReadingState,
+    current_net_mass: float,
+    last_valid_weight: float,
+) -> tuple[float, float, str, bool]:
+    """Determina o peso e o label textual conforme a FSM de estabilidade."""
+    if state == ReadingState.NO_LOAD:
+        return 0.0, 0.0, "SEM CARGA", False
+    if state == ReadingState.MOVING:
+        msg = "PACIENTE EM MOVIMENTO — AGUARDANDO ESTABILIZAÇÃO"
+        return last_valid_weight, last_valid_weight, msg, False
+    if state == ReadingState.STABILIZING:
+        return last_valid_weight, last_valid_weight, "ESTABILIZANDO", False
+    return current_net_mass, current_net_mass, "MEDIÇÃO ESTÁVEL", True
 
 
 class AcquisitionWorker:
@@ -48,6 +70,8 @@ class AcquisitionWorker:
         maca_id: str = "MACA-01",
         reader: BaseFrameReader | None = None,
         broadcast_callback: Callable[[dict[str, Any]], None] | None = None,
+        baseline_compensator: MatBaselineCompensator | None = None,
+        stability_detector: ReadingStabilityDetector | None = None,
     ) -> None:
         self._db = db
         self._maca_id = maca_id
@@ -63,6 +87,22 @@ class AcquisitionWorker:
         self._tare_offset_kg = load_tare(_TARE_PATH)
         self._tare_pending = False
         self._tare_samples: list[float] = []
+
+        # Compensação de Baseline e Estabilidade
+        self.baseline_compensator = (
+            baseline_compensator
+            if baseline_compensator is not None
+            else MatBaselineCompensator(baseline_path=_BASELINE_PATH)
+        )
+        self.stability_detector = (
+            stability_detector
+            if stability_detector is not None
+            else ReadingStabilityDetector(
+                t_min_s=self.params.stability_tmin_seconds,
+                epsilon_s=self.params.stability_epsilon_raw,
+                d_max_matrix=self.params.motion_dmax_matrix,
+            )
+        )
 
         # Compensação de Creep e Auto-ReZero
         self._creep = CreepCompensator(
@@ -102,6 +142,11 @@ class AcquisitionWorker:
             "is_locked": False,
             "locked_weight_kg": 0.0,
             "stable_progress_pct": 0.0,
+            "state_id": ReadingState.NO_LOAD.value,
+            "state_label": "SEM CARGA",
+            "matrix_delta": 0.0,
+            "temporal_delta": 0.0,
+            "dispersion_sigma": 0.0,
             "cop": {"row": 0.0, "col": 0.0},
             "posture_info": {
                 "posture": "Leito Livre",
@@ -142,15 +187,21 @@ class AcquisitionWorker:
             return dict(self._live_state)
 
     def update_param(self, key: str, value: float) -> None:
-        """Atualiza parâmetro de calibração em runtime."""
+        """Atualiza parâmetro de calibração em runtime e sincroniza estabilidade."""
         self.params.update(key, value)
         snap = self.params.snapshot()
         self.monitor.update_tolerance(snap["posture_tolerance"])
         self.monitor.update_timeout(int(snap["posture_timeout_seconds"]))
+        if key == "stability_tmin_seconds":
+            self.stability_detector.t_min_s = float(value)
+        elif key == "motion_dmax_matrix":
+            self.stability_detector.d_max_matrix = float(value)
+        elif key == "stability_epsilon_raw":
+            self.stability_detector.epsilon_s = float(value)
 
     def _loop(self) -> None:
         previous_weight = 0.0
-        rolling_history: collections.deque[tuple[float, float]] = collections.deque()
+        last_valid_weight = 0.0
         last_telemetry_time = time.monotonic()
         last_recorded_posture: str | None = None
         last_posture_change_time = time.monotonic()
@@ -159,65 +210,53 @@ class AcquisitionWorker:
             try:
                 now = time.monotonic()
                 connected = self._reader.is_connected()
-                adc_matrix = self._reader.read_frame()
+                raw_adc = self._reader.read_frame()
 
-                # Pipeline Físico (ML prioritário com fallback para calibração)
-                force_matrix = compute_force_matrix(adc_matrix, self.params)
+                # 1. FSM de estabilidade da aquisição
+                stability_state = self.stability_detector.update(raw_adc, now)
+
+                # 2. Correção de baseline matricial B(t)
+                corrected_adc = correct_baseline(raw_adc, self.baseline_compensator)
+
+                # 3. Auto-ReZero de baseline quando maca vazia por >=30s
+                if self.baseline_compensator.evaluate_auto_rezero(raw_adc, now, min_empty_seconds=30.0):
+                    self.baseline_compensator.update_baseline(raw_adc)
+                    self._tare_offset_kg = 0.0
+                    self._creep.reset()
+
+                # 4. Pipeline Físico (deadzone, força e estimativa bruta)
+                force_matrix = compute_force_matrix(corrected_adc, self.params)
                 raw_mass = compute_total_mass(force_matrix, self.calib, self.ml_predictor)
                 snap = self.params.snapshot()
                 smoothed_mass = apply_ema(raw_mass, previous_weight, snap["ema_alpha"])
                 previous_weight = smoothed_mass
 
-                # Compensação de Creep — limita drift temporal
+                # 5. Compensação de Creep
                 compensated_mass = self._creep.update(smoothed_mass)
-
-                # Tara
                 net_mass = max(0.0, compensated_mass - self._tare_offset_kg)
                 force_n = compute_total_force(force_matrix, self.calib)
 
-                # Centro de Pressão 2D real
+                # 6. Centro de Pressão 2D real
                 cop_row, cop_col = compute_cop(force_matrix)
 
-                # Auto-ReZero — recalibra baseline quando manta vazia por >30s
-                if self._auto_rezero.check(net_mass):
-                    self._execute_auto_tare(smoothed_mass)
+                # 7. Decisão de Leitura via FSM (congelamento em movimento)
+                displayed_weight, last_valid_weight, state_label, weight_locked = _resolve_display_weight(
+                    stability_state, net_mass, last_valid_weight
+                )
+                locked_weight_kg = displayed_weight if weight_locked else last_valid_weight
+                stable_progress_pct = self.stability_detector.get_progress_pct(now)
 
-                # Média Móvel de 60 segundos com Reset Rápido
-                if net_mass < 0.5:
-                    rolling_history.clear()
-                    displayed_weight = 0.0
-                    weight_locked = False
-                    locked_weight_kg = 0.0
-                    stable_progress_pct = 0.0
-                else:
-                    if rolling_history:
-                        curr_avg = sum(m for _, m in rolling_history) / len(rolling_history)
-                        if abs(net_mass - curr_avg) > FAST_RESET_THRESHOLD_KG:
-                            rolling_history.clear()
-                            logger.info("Degrau detectado (>%.1f kg) — Buffer de 60s reiniciado", FAST_RESET_THRESHOLD_KG)
-
-                    rolling_history.append((now, net_mass))
-                    cutoff = now - WEIGHT_WINDOW_SECONDS
-                    while rolling_history and rolling_history[0][0] < cutoff:
-                        rolling_history.popleft()
-
-                    displayed_weight = sum(m for _, m in rolling_history) / len(rolling_history)
-                    span_s = rolling_history[-1][0] - rolling_history[0][0] if len(rolling_history) > 1 else 0.0
-                    stable_progress_pct = min(100.0, (span_s / WEIGHT_WINDOW_SECONDS) * 100.0)
-                    weight_locked = stable_progress_pct >= 95.0
-                    locked_weight_kg = displayed_weight
-
-                # Classificação Postural e Prevenção LPP
+                # 8. Classificação Postural e Prevenção LPP
                 self.monitor.update_tolerance(snap["posture_tolerance"])
                 self.monitor.update_timeout(int(snap["posture_timeout_seconds"]))
                 alert = self.monitor.update(force_matrix)
                 posture_info = self.monitor.classify_posture(force_matrix)
 
-                # Normalização do Heatmap (0-1)
+                # 9. Normalização do Heatmap (0-1)
                 max_val = float(np.max(force_matrix))
                 normalized_map = (force_matrix / max_val if max_val > 0 else force_matrix).tolist()
 
-                # Processamento de Tara
+                # 10. Processamento de Tara manual
                 tare_to_save: float | None = None
                 with self._state_lock:
                     if self._tare_pending:
@@ -239,6 +278,11 @@ class AcquisitionWorker:
                         "is_locked": weight_locked,
                         "locked_weight_kg": round(locked_weight_kg, 2),
                         "stable_progress_pct": round(stable_progress_pct, 1),
+                        "state_id": stability_state.value,
+                        "state_label": state_label,
+                        "matrix_delta": round(self.stability_detector.matrix_delta, 1),
+                        "temporal_delta": round(self.stability_detector.temporal_delta, 1),
+                        "dispersion_sigma": round(self.stability_detector.dispersion_sigma, 2),
                         "cop": {"row": round(cop_row, 2), "col": round(cop_col, 2)},
                         "posture_info": posture_info,
                     }

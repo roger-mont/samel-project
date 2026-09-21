@@ -27,6 +27,11 @@ def get_sensor_data() -> dict[str, Any]:
         "is_locked": False,
         "locked_weight_kg": 0.0,
         "stable_progress_pct": 0.0,
+        "state_id": "SEM CARGA",
+        "state_label": "SEM CARGA",
+        "matrix_delta": 0.0,
+        "temporal_delta": 0.0,
+        "dispersion_sigma": 0.0,
         "posture_info": {
             "posture": "Leito Livre",
             "asymmetry_pct": 0.0,
