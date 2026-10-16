@@ -12,16 +12,29 @@ logger = logging.getLogger(__name__)
 
 GRAVITY_M_S2: float = 9.81
 
+# Setores físicos da manta, vistos de cima com a cabeceira no alto.
+# O cabo entra no setor 1 (cabeceira, lado direito do paciente):
+#
+#     [1][8]   cabeceira
+#     [2][7]
+#     [3][6]
+#     [4][5]   peseira
+#
+# Na matriz 32×64: linhas 0-15 = lado direito (1-4), linhas 16-31 = lado esquerdo (8-5);
+# colunas 63 → 0 = cabeceira → peseira. O número do setor é o block_id do pacote HID.
 BLOCK_REGIONS: dict[int, tuple[slice, slice]] = {
-    1: (slice(0,  16), slice(48, 64)),  # Canto Superior Direito
-    2: (slice(0,  16), slice(32, 48)),  # Superior Meio-Direito
-    3: (slice(0,  16), slice(16, 32)),  # Superior Meio-Esquerdo
-    4: (slice(0,  16), slice(0,  16)),  # Canto Superior Esquerdo
-    5: (slice(16, 32), slice(0,  16)),  # Canto Inferior Esquerdo
-    6: (slice(16, 32), slice(16, 32)),  # Inferior Meio-Esquerdo
-    7: (slice(16, 32), slice(32, 48)),  # Inferior Meio-Direito
-    8: (slice(16, 32), slice(48, 64)),  # Canto Inferior Direito
+    1: (slice(0,  16), slice(48, 64)),  # Cabeceira, lado direito (cabo)
+    2: (slice(0,  16), slice(32, 48)),  # 2º setor, lado direito
+    3: (slice(0,  16), slice(16, 32)),  # 3º setor, lado direito
+    4: (slice(0,  16), slice(0,  16)),  # Peseira, lado direito
+    5: (slice(16, 32), slice(0,  16)),  # Peseira, lado esquerdo
+    6: (slice(16, 32), slice(16, 32)),  # 3º setor, lado esquerdo
+    7: (slice(16, 32), slice(32, 48)),  # 2º setor, lado esquerdo
+    8: (slice(16, 32), slice(48, 64)),  # Cabeceira, lado esquerdo
 }
+
+# Ordem física dos setores, da cabeceira para a peseira: (lado direito, lado esquerdo)
+SECTOR_LAYOUT: list[tuple[int, int]] = [(1, 8), (2, 7), (3, 6), (4, 5)]
 
 
 class _BlockCalib:

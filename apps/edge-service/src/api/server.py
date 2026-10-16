@@ -14,14 +14,21 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status, Request
+import numpy as np
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from fastapi.responses import FileResponse
+
 from core.config import LOG_LEVEL, MACA_ID, config_manager
 from database.db_local import LocalDatabase
+from math_engine.gain_fit import MODES as GAIN_MODES, curves_sha1, fit_gains, fit_report, leave_one_out, write_gains
+from math_engine.mass_models import BlockCurveModel
+from math_engine.model_comparison import MODES, ComparisonCache, ModelComparison
 from workers.sync_worker import SyncWorker
 from workers.acquisition_worker import AcquisitionWorker
 
@@ -30,6 +37,9 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger("edge_server")
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_comparison_cache = ComparisonCache()
 
 
 # -----------------------------------------------------------------------------
@@ -75,8 +85,31 @@ class PostureEventPayload(BaseModel):
 
 
 class CalibrationUpdatePayload(BaseModel):
-    param_name: str = Field(..., description="Nome do parâmetro (deadzone_threshold, ema_alpha, posture_tolerance, posture_timeout_seconds)")
+    param_name: str = Field(..., description="Nome do parâmetro (ver GET /api/v1/calibration/params)")
     value: float = Field(..., description="Novo valor do parâmetro")
+    persist: bool = Field(default=False, description="Grava o valor em config.json (bloco 'acquisition')")
+
+
+class GainPointPayload(BaseModel):
+    known_mass_kg: float = Field(..., gt=0.0, le=500.0, description="Massa real sobre a maca, em kg")
+    note: str | None = Field(default=None, max_length=80, description="Ex.: placa no centro, setores 2 e 7")
+
+
+class GainFitPayload(BaseModel):
+    mode: str = Field(default="global", description="global | setor")
+    lam: float = Field(default=1.0, ge=0.0, le=1000.0, description="λ do modo setor (puxa cada α para o global)")
+
+
+class ExperimentStartPayload(BaseModel):
+    operator: str | None = Field(default=None, description="Quem conduz o ensaio")
+    description: str | None = Field(default=None, description="Objetivo e montagem do ensaio")
+    contact_area: str | None = Field(default=None, description="Ex.: penetrador de 27 mm (moeda de R$ 1)")
+
+
+class ExperimentMarkPayload(BaseModel):
+    cycle_id: int | None = Field(default=None, ge=0)
+    known_mass_g: float | None = Field(default=None, ge=0.0)
+    loading_direction: str | None = Field(default=None, description="UP | DOWN | UNKNOWN")
 
 
 # -----------------------------------------------------------------------------
@@ -228,26 +261,85 @@ def get_live_telemetry(request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/v1/calibration/tare", tags=["Calibração"])
-def trigger_tare(request: Request) -> dict[str, str]:
-    """Dispara ciclo de amostragem e compensação de tara."""
+def trigger_tare(request: Request) -> dict[str, Any]:
+    """Inicia uma tara de T_TARE segundos. A maca precisa estar vazia."""
     acq = _get_acq(request.app)
     acq.trigger_tare()
-    return {"status": "ok", "message": "Amostragem de tara iniciada"}
+    return {"status": "ok", "message": "Amostragem de tara iniciada", "tare": acq.tare_status()}
+
+
+@app.get("/api/v1/calibration/tare", tags=["Calibração"])
+def get_tare_status(request: Request) -> dict[str, Any]:
+    """Tara em vigor (tare_id, horário, média e desvio do baseline) e se há coleta em curso."""
+    return _get_acq(request.app).tare_status()
 
 
 @app.get("/api/v1/calibration/params", tags=["Calibração"])
 def get_calibration_params(request: Request) -> dict[str, Any]:
-    """Retorna os parâmetros de calibração em vigor."""
+    """Retorna os parâmetros de aquisição e estabilidade em vigor."""
     acq = _get_acq(request.app)
-    return acq.params.snapshot()
+    return {**acq.params.snapshot(), "configuration_id": acq.configuration_id()}
 
 
 @app.post("/api/v1/calibration/params", tags=["Calibração"])
 def update_calibration_param(payload: CalibrationUpdatePayload, request: Request) -> dict[str, Any]:
-    """Atualiza parâmetro de calibração em runtime."""
+    """Atualiza parâmetro em runtime (e opcionalmente em config.json)."""
     acq = _get_acq(request.app)
-    acq.update_param(payload.param_name, payload.value)
-    return {"status": "ok", "params": acq.params.snapshot()}
+    try:
+        acq.update_param(payload.param_name, payload.value, persist=payload.persist)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"status": "ok", "params": acq.params.snapshot(), "configuration_id": acq.configuration_id()}
+
+
+# -----------------------------------------------------------------------------
+# Endpoints de Experimentos (gravação do RAW completo)
+# -----------------------------------------------------------------------------
+
+@app.get("/api/v1/experiments", tags=["Experimentos"])
+def get_experiment_status(request: Request) -> dict[str, Any]:
+    return _get_acq(request.app).recorder.status()
+
+
+@app.post("/api/v1/experiments/start", tags=["Experimentos"])
+def start_experiment(payload: ExperimentStartPayload, request: Request) -> dict[str, Any]:
+    """Começa a gravar o RAW de todos os frames, com parâmetros, modelo e tara em vigor."""
+    acq = _get_acq(request.app)
+    model = acq.models.active()
+    meta = {
+        **payload.model_dump(),
+        "maca_id": acq._maca_id,
+        "configuration_id": acq.configuration_id(),
+        "params": acq.params.snapshot(),
+        "model": acq.models.describe(),
+        "model_version": model.model_version if model else None,
+        "calibration_version": model.calibration_version if model else None,
+        "tare": acq.tare_status()["record"],
+    }
+    try:
+        return acq.recorder.start(meta)
+    except RuntimeError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+
+
+@app.post("/api/v1/experiments/mark", tags=["Experimentos"])
+def mark_experiment(payload: ExperimentMarkPayload, request: Request) -> dict[str, Any]:
+    """Registra, a partir de agora, ciclo, massa conhecida e sentido de carga."""
+    try:
+        return _get_acq(request.app).recorder.mark(
+            cycle_id=payload.cycle_id,
+            known_mass_g=payload.known_mass_g,
+            loading_direction=payload.loading_direction,
+        )
+    except RuntimeError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+
+@app.post("/api/v1/experiments/stop", tags=["Experimentos"])
+def stop_experiment(request: Request) -> dict[str, Any]:
+    return _get_acq(request.app).recorder.stop()
 
 
 # -----------------------------------------------------------------------------
@@ -461,34 +553,278 @@ def get_system_status(request: Request) -> dict[str, Any]:
 
 @app.get("/api/v1/calibration/model", tags=["Calibração"])
 def get_model_info(request: Request) -> dict[str, Any]:
-    """Retorna informações do modelo de peso ativo (Machine Learning ou Calibração Polinomial)."""
+    """Modelos de massa disponíveis e qual está ativo."""
     acq = _get_acq(request.app)
-    if not acq:
-        return {"model_type": "none", "ml_loaded": False}
+    return {"maca_id": MACA_ID, **acq.models.describe()}
 
-    ml_active = acq.ml_predictor.is_loaded
+
+@app.get("/api/v1/calibration/curves", tags=["Calibração"])
+def get_calibration_curves(request: Request) -> dict[str, Any]:
+    """Curvas em vigor por setor: fontes, pontos medidos, ajuste isotônico, curva amostrada e ganhos α_s."""
+    model = _get_acq(request.app).models.models.get("block_curves")
+    if not isinstance(model, BlockCurveModel) or not model.is_ready:
+        raise HTTPException(status_code=404, detail="block_curves.json ausente ou incompleto")
+    definition = model.raw_definition
+    blocks = definition["blocks"]
+    sources = definition.get("sources", [])
+    sectors = {}
+    for bid_str, curve in blocks.items():
+        sectors[bid_str] = {
+            "source": curve.get("source", "cells"),
+            "cells": curve.get("cells", []),
+            "sources": [s for s in sources if str(s.get("block")) == bid_str],
+            "fit": curve.get("fit", definition.get("fit", [])),
+            "knots": curve["params"],
+            "raw_min_valid": curve["raw_min_valid"],
+            "raw_max_valid": curve["raw_max_valid"],
+            "mass_max_valid_kg": curve["mass_max_valid"],
+            "low_sensitivity_raw": curve.get("low_sensitivity_raw"),
+            "sensitivity_g_per_raw": curve.get("sensitivity_g_per_raw", []),
+            "validation": curve.get("validation"),
+            "gain": model.gains.get(int(bid_str), 1.0),
+            "samples_raw_mass_g": model.curve_samples(int(bid_str)),
+        }
+    curve_keys = ("kind", "params", "raw_min_valid", "raw_max_valid", "mass_max_valid")
     return {
-        "maca_id": MACA_ID,
-        "active_engine": "machine_learning" if ml_active else "polynomial_blocks",
-        "ml_loaded": ml_active,
-        "ml_metadata": acq.ml_predictor.metadata if ml_active else None,
-        "calib_valid": acq.calib.is_valid if acq.calib else False,
+        "calibration_version": definition["calibration_version"],
+        "model_version": definition.get("model_version"),
+        "provisional": definition.get("provisional", False),
+        "method": definition.get("method"),
+        "notes": definition.get("notes", []),
+        "sector_layout": definition.get("sector_layout"),
+        "aggregation": definition.get("aggregation"),
+        "gains_calibrated": model.gains_calibrated,
+        "identical_in_all_sectors": len({json.dumps({k: b.get(k) for k in curve_keys}, sort_keys=True)
+                                         for b in blocks.values()}) == 1,
+        "sectors": sectors,
     }
+
+
+@app.get("/api/v1/calibration/extraction", tags=["Calibração"])
+def get_calibration_extraction(request: Request) -> dict[str, Any]:
+    """Extração da janela atual por setor e por célula, com a curva de cada setor."""
+    data = _get_acq(request.app).extraction()
+    if data is None:
+        raise HTTPException(status_code=409, detail="Modelo ativo não é a curva por bloco")
+    return data
+
+
+def _comparison(request: Request) -> tuple[AcquisitionWorker, ModelComparison]:
+    acq = _get_acq(request.app)
+    model = acq.models.models.get("block_curves")
+    if not isinstance(model, BlockCurveModel) or not model.is_ready:
+        raise HTTPException(status_code=404, detail="block_curves.json ausente ou incompleto")
+    return acq, _comparison_cache.get(model.raw_definition, model.gains)
+
+
+@app.get("/api/v1/calibration/compare", tags=["Calibração"])
+def get_model_comparison(request: Request) -> dict[str, Any]:
+    """Massa da janela atual por todos os modelos candidatos (curvas e ML), só para diagnóstico.
+
+    O peso clínico continua vindo só do modelo em vigor. Os candidatos são treinados com
+    os pontos de block_curves.json por setor ("sector") e com todas as células ("global").
+    """
+    acq, comparison = _comparison(request)
+    live = acq.get_live_snapshot()
+    return {
+        "timestamp": live.get("timestamp"),
+        "weight_status": live.get("weight_status"),
+        "weight_kg": live.get("weight_kg"),
+        "estimated_mass_kg": live.get("estimated_mass_kg"),
+        "stable_progress_pct": live.get("stable_progress_pct"),
+        "active_blocks": acq.active_blocks,
+        "calibration_version": comparison.version,
+        "models": comparison.evaluate(acq.window_corrected(), acq.active_blocks),
+    }
+
+
+@app.get("/api/v1/calibration/compare/curves", tags=["Calibração"])
+def get_model_comparison_curves(request: Request, sector: int = 2, mode: str = "sector") -> dict[str, Any]:
+    """Curvas RAW → massa local de todos os modelos candidatos para um setor."""
+    if mode not in MODES:
+        raise HTTPException(status_code=422, detail=f"mode deve ser um de {MODES}")
+    _, comparison = _comparison(request)
+    if sector not in comparison.raw_max_valid:
+        raise HTTPException(status_code=422, detail="setor deve estar entre 1 e 8")
+    return {"sector": sector, "mode": mode, "models": comparison.curves(mode, sector)}
+
+
+# -----------------------------------------------------------------------------
+# Ajuste de ganho α_s (massa local → massa total) pela página /calibracao
+# -----------------------------------------------------------------------------
+
+def _block_model(acq: AcquisitionWorker) -> BlockCurveModel:
+    model = acq.models.models.get("block_curves")
+    if not isinstance(model, BlockCurveModel) or not model.is_ready:
+        raise HTTPException(status_code=404, detail="block_curves.json ausente ou incompleto")
+    return model
+
+
+def _gain_points(acq: AcquisitionWorker, model: BlockCurveModel) -> list[dict[str, Any]]:
+    """Pontos registrados com as massas locais recalculadas pelas curvas em vigor.
+
+    Setores fora da medição entram com massa local zero, como na massa total.
+    """
+    gains = model.gains
+    out = []
+    for p in acq.gain_points.list():
+        corrected = acq.gain_points.corrected(p)
+        local = model.sector_local_sums(corrected)
+        local = {b: (v if b in acq.active_blocks else 0.0) for b, v in local.items()}
+        outside = model.sector_out_of_calibration(corrected)
+        current = sum(gains[b] * v for b, v in local.items())
+        view = {k: v for k, v in p.items() if k != "corrected"}
+        view.update({
+            "local_kg": {str(b): round(v, 4) for b, v in local.items()},
+            "local_total_kg": round(sum(local.values()), 4),
+            "current_estimate_kg": round(current, 4),
+            "current_error_kg": round(current - p["known_mass_kg"], 4),
+            "cells_out_of_calibration": sum(outside[b] for b in acq.active_blocks),
+        })
+        out.append(view)
+    return out
+
+
+def _gain_fit(acq: AcquisitionWorker, model: BlockCurveModel, payload: GainFitPayload) -> dict[str, Any]:
+    if payload.mode not in GAIN_MODES:
+        raise HTTPException(status_code=422, detail=f"mode deve ser um de {GAIN_MODES}")
+    points = _gain_points(acq, model)
+    if len(points) < 2:
+        raise HTTPException(status_code=400, detail="Registre pelo menos 2 pontos com massa conhecida antes de calcular.")
+    blocks = sorted(model.gains)
+    L = np.array([[p["local_kg"][str(b)] for b in blocks] for p in points])
+    M = np.array([p["known_mass_kg"] for p in points])
+    empty = [i + 1 for i, row in enumerate(L) if row.sum() <= 0]
+    if empty:
+        raise HTTPException(status_code=400, detail=f"Ponto(s) {empty} com massa local zero: confira a tara e apague esses pontos.")
+    alpha = fit_gains(L, M, payload.mode, payload.lam)
+    loo = leave_one_out(L, M, payload.mode, payload.lam)
+    warnings = []
+    if payload.mode == "setor" and len(points) < len(acq.active_blocks):
+        warnings.append(f"{len(points)} pontos para {len(acq.active_blocks)} ganhos: os α por setor ficam perto do α global.")
+    if any(p["cells_out_of_calibration"] for p in points):
+        warnings.append("Há pontos com células acima da faixa calibrada; a massa delas fica cortada e puxa o α para cima.")
+    total = L.sum(axis=1)
+    return {
+        "mode": payload.mode,
+        "lam": payload.lam if payload.mode == "setor" else None,
+        "alpha": {str(b): round(float(a), 5) for b, a in zip(blocks, alpha)},
+        "alpha_global": round(float(total @ M / (total @ total)), 5),
+        "current_gains": {str(b): g for b, g in model.gains.items()},
+        "report": fit_report(L, M, alpha, payload.mode, payload.lam),
+        "points": [{"id": p["id"], "known_mass_kg": p["known_mass_kg"], "without_gain_kg": round(float(s), 4),
+                    "current_kg": p["current_estimate_kg"], "fitted_kg": round(float(f), 4),
+                    "leave_one_out_kg": None if o is None else round(o, 4)}
+                   for p, s, f, o in zip(points, total, L @ alpha, loo)],
+        "warnings": warnings,
+    }
+
+
+def _gain_state(acq: AcquisitionWorker, model: BlockCurveModel) -> dict[str, Any]:
+    aggregation = model.raw_definition.get("aggregation") or {}
+    fit = aggregation.get("fit") or None
+    return {
+        "gains": {str(b): g for b, g in model.gains.items()},
+        "calibrated": model.gains_calibrated,
+        "fit": fit,
+        "fit_matches_curves": bool(fit) and fit.get("curves_sha1") == curves_sha1(model.raw_definition),
+        "calibration_version": model.calibration_version,
+        "active_blocks": acq.active_blocks,
+        "tare_id": acq.baseline.record.tare_id if acq.baseline.record else None,
+        "points": _gain_points(acq, model),
+    }
+
+
+@app.get("/api/v1/calibration/gain", tags=["Calibração"])
+def get_gain_state(request: Request) -> dict[str, Any]:
+    """Ganhos α_s em vigor e os pontos registrados para o ajuste (massas locais pelas curvas atuais)."""
+    acq = _get_acq(request.app)
+    return _gain_state(acq, _block_model(acq))
+
+
+@app.post("/api/v1/calibration/gain/points", tags=["Calibração"])
+def add_gain_point(payload: GainPointPayload, request: Request) -> dict[str, Any]:
+    """Registra a massa real e a média estável dos últimos segundos da manta inteira."""
+    acq = _get_acq(request.app)
+    model = _block_model(acq)
+    if acq.baseline.record is None:
+        raise HTTPException(status_code=409, detail="Faça a tara com a maca vazia antes de registrar pontos.")
+    capture = acq.stable_capture()
+    if capture is None:
+        raise HTTPException(status_code=409, detail="A leitura ainda não está estável. Espere o estado ficar Estável ou Válido.")
+    corrected, frames, seconds = capture
+    live = acq.get_live_snapshot()
+    acq.gain_points.add(payload.known_mass_kg, corrected, {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "note": (payload.note or "").strip() or None,
+        "frames": frames,
+        "seconds": round(seconds, 2),
+        "tare_id": acq.baseline.record.tare_id,
+        "calibration_version": model.calibration_version,
+        "estimated_mass_kg": live.get("estimated_mass_kg"),
+    })
+    return _gain_state(acq, model)
+
+
+@app.delete("/api/v1/calibration/gain/points/{point_id}", tags=["Calibração"])
+def delete_gain_point(point_id: str, request: Request) -> dict[str, Any]:
+    acq = _get_acq(request.app)
+    if not acq.gain_points.delete(point_id):
+        raise HTTPException(status_code=404, detail="Ponto não encontrado")
+    return _gain_state(acq, _block_model(acq))
+
+
+@app.delete("/api/v1/calibration/gain/points", tags=["Calibração"])
+def clear_gain_points(request: Request) -> dict[str, Any]:
+    acq = _get_acq(request.app)
+    acq.gain_points.clear()
+    return _gain_state(acq, _block_model(acq))
+
+
+@app.post("/api/v1/calibration/gain/fit", tags=["Calibração"])
+def preview_gain_fit(payload: GainFitPayload, request: Request) -> dict[str, Any]:
+    """Calcula os α_s com os pontos registrados, sem gravar."""
+    acq = _get_acq(request.app)
+    return _gain_fit(acq, _block_model(acq), payload)
+
+
+@app.post("/api/v1/calibration/gain/apply", tags=["Calibração"])
+def apply_gain_fit(payload: GainFitPayload, request: Request) -> dict[str, Any]:
+    """Calcula os α_s, grava em block_curves.json e recarrega o modelo."""
+    acq = _get_acq(request.app)
+    model = _block_model(acq)
+    result = _gain_fit(acq, model, payload)
+    write_gains(model.path, {int(b): a for b, a in result["alpha"].items()}, {
+        "source": "painel /calibracao",
+        "mode": result["mode"],
+        "lambda": result["lam"],
+        "point_ids": [p["id"] for p in result["points"]],
+        **result["report"],
+    })
+    acq.models.reload()
+    return _gain_state(acq, _block_model(acq))
+
+
+@app.post("/api/v1/calibration/gain/reset", tags=["Calibração"])
+def reset_gains(request: Request) -> dict[str, Any]:
+    """Volta todos os α_s para 1 (não calibrado). Os pontos registrados continuam."""
+    acq = _get_acq(request.app)
+    write_gains(_block_model(acq).path, None, None)
+    acq.models.reload()
+    return _gain_state(acq, _block_model(acq))
+
+
+@app.get("/calibracao", include_in_schema=False)
+def calibration_page() -> FileResponse:
+    """Página de diagnóstico da calibração (curva + extração ao vivo)."""
+    return FileResponse(_STATIC_DIR / "calibracao.html", media_type="text/html; charset=utf-8")
 
 
 @app.post("/api/v1/calibration/reload-model", tags=["Calibração"])
 def reload_model(request: Request) -> dict[str, Any]:
-    """Recarrega o modelo ML treinado e calibrações a quente (sem reiniciar o serviço)."""
+    """Recarrega as curvas por bloco (block_curves.json) sem reiniciar o serviço."""
     acq = _get_acq(request.app)
-    if not acq:
-        return {"status": "error", "message": "AcquisitionWorker não disponível"}
-
-    reloaded = acq.ml_predictor.load()
-    return {
-        "status": "success" if reloaded else "fallback_polynomial",
-        "ml_loaded": reloaded,
-        "message": "Modelo ML recarregado com sucesso" if reloaded else "Modelo ML não encontrado, usando calibração padrão",
-        "metadata": acq.ml_predictor.metadata if reloaded else None,
-    }
+    loaded = acq.models.reload()
+    return {"status": "ok", "loaded": loaded, **acq.models.describe()}
 
 

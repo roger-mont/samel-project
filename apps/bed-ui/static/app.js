@@ -352,32 +352,50 @@
     function updateKPIs(data) {
         if (!data) return;
 
-        const weightKg = data.weight_kg !== undefined ? data.weight_kg : 64.5;
-        const isLocked = Boolean(data.is_locked);
-        const progressPct = data.stable_progress_pct !== undefined ? data.stable_progress_pct : 100;
-        const staticSecs = data.static_seconds !== undefined ? data.static_seconds : 1122; // 18m42s
+        // weight_kg só vem preenchido quando weight_status === "VALID"
+        const weightStatus = data.weight_status || "NO_LOAD";
+        const weightKg = typeof data.weight_kg === "number" ? data.weight_kg : null;
+        const lastValidKg = typeof data.last_valid_weight_kg === "number" ? data.last_valid_weight_kg : null;
+        const isLocked = weightStatus === "VALID";
+        const progressPct = data.stable_progress_pct !== undefined ? data.stable_progress_pct : 0;
+        const staticSecs = data.static_seconds !== undefined ? data.static_seconds : 0;
         const isAlert = Boolean(data.is_alert);
 
-        // KPI 1: Peso
-        if (DOM.kpiWeightVal) DOM.kpiWeightVal.textContent = weightKg.toFixed(2);
-        if (DOM.patientWeightHeader) DOM.patientWeightHeader.textContent = `${weightKg.toFixed(2)} kg`;
+        // KPI 1: Peso — nunca um número aparentemente preciso quando a leitura não é válida
+        let weightText = "—";
+        let headerText = "Sem carga";
+        if (weightKg !== null) {
+            weightText = weightKg.toFixed(2);
+            headerText = `${weightKg.toFixed(2)} kg`;
+        } else if (weightStatus !== "NO_LOAD") {
+            weightText = "Não validado";
+            headerText = lastValidKg !== null
+                ? `PESO NÃO VALIDADO — último válido: ${lastValidKg.toFixed(2)} kg`
+                : "PESO NÃO VALIDADO — AGUARDANDO ESTABILIZAÇÃO";
+        }
+        if (DOM.kpiWeightVal) DOM.kpiWeightVal.textContent = weightText;
+        if (DOM.patientWeightHeader) DOM.patientWeightHeader.textContent = headerText;
 
-        const stateId = data.state_id || (isLocked ? "CARGA ESTAVEL" : "ESTABILIZANDO");
-        const stateLabel = data.state_label || "";
+        const stateId = data.state_id || "SEM_CARGA";
 
         if (DOM.kpiStabilityFill) {
             DOM.kpiStabilityFill.style.width = `${Math.min(100, Math.max(0, progressPct))}%`;
-            if (stateId === "CARGA ESTAVEL" || isLocked) {
+            if (stateId === "MEDICAO_VALIDA") {
                 DOM.kpiStabilityFill.classList.add("locked");
                 DOM.kpiStabilityText.textContent = "Estabilidade: 100%";
-                DOM.kpiStabilityStatus.textContent = "Medição Estável ✓";
+                DOM.kpiStabilityStatus.textContent = "Medição Válida ✓";
                 DOM.kpiStabilityStatus.style.color = "var(--samel-teal-dark)";
-            } else if (stateId === "CARREGANDO/MOVIMENTO") {
+            } else if (stateId === "ESTAVEL") {
+                DOM.kpiStabilityFill.classList.add("locked");
+                DOM.kpiStabilityText.textContent = "Sinal estável";
+                DOM.kpiStabilityStatus.textContent = "Peso não validado ⚠️";
+                DOM.kpiStabilityStatus.style.color = "var(--samel-amber)";
+            } else if (stateId === "MOVIMENTO") {
                 DOM.kpiStabilityFill.classList.remove("locked");
                 DOM.kpiStabilityText.textContent = "Aguardando estabilização...";
                 DOM.kpiStabilityStatus.textContent = "Paciente em Movimento ⚠️";
                 DOM.kpiStabilityStatus.style.color = "var(--samel-amber)";
-            } else if (stateId === "SEM CARGA") {
+            } else if (stateId === "SEM_CARGA") {
                 DOM.kpiStabilityFill.classList.remove("locked");
                 DOM.kpiStabilityText.textContent = "Leito Desocupado";
                 DOM.kpiStabilityStatus.textContent = "Sem Carga";
@@ -429,7 +447,7 @@
 
         // Atualização Dinâmica nos Headers dos 3 Gráficos
         if (DOM.chartLiveWeight) {
-            DOM.chartLiveWeight.textContent = `${weightKg.toFixed(1)} kg`;
+            DOM.chartLiveWeight.textContent = weightKg !== null ? `${weightKg.toFixed(1)} kg` : "—";
         }
         if (DOM.chartLiveTime) {
             DOM.chartLiveTime.textContent = `${Math.round(staticSecs / 60)} min`;

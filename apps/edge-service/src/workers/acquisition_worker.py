@@ -1,7 +1,8 @@
-"""Worker de aquisição contínua de hardware (USB HID / Serial), processamento físico e persistência."""
+"""Worker de aquisição contínua: RAW → baseline → janela → estados → modelo → validação → API."""
 from __future__ import annotations
 
-import collections
+from collections import deque
+from dataclasses import asdict
 from datetime import datetime, timezone
 import logging
 import threading
@@ -11,57 +12,52 @@ from typing import Any, Callable
 
 import numpy as np
 
-from core.settings import (
-    CalibrationParams, TARE_SAMPLE_COUNT,
-    WEIGHT_WINDOW_SECONDS, FAST_RESET_THRESHOLD_KG,
-)
+from core.config import config_manager
+from core.settings import HID_COLS, HID_ROWS, SOFTWARE_VERSION, CalibrationParams
+from storage.calibration_store import BLOCK_REGIONS
 from database.db_local import LocalDatabase
 from hardware.serial_reader import BaseFrameReader, HidFrameReader, FakeSerialReader
-from math_engine.creep_compensator import CreepCompensator, AutoReZero
-from math_engine.mat_baseline_compensator import MatBaselineCompensator
-from math_engine.ml_weight import MLWeightPredictor
-from math_engine.pipeline import (
-    compute_force_matrix, compute_total_mass, compute_total_force,
-    compute_cop, apply_ema, correct_baseline,
-)
-from math_engine.reading_stability_detector import ReadingStabilityDetector, ReadingState
+from math_engine.mass_models import BlockCurveModel, MassEstimate, ModelRegistry, WindowFrame
+from math_engine.pipeline import apply_deadzone, window_mean
+from math_engine.quality import QualityFlags, saturated_cells
+from math_engine.reading_state import STATE_LABELS, ReadingState, ReadingStateMachine
+from math_engine.spatial_baseline import SpatialBaseline
+from math_engine.spatial_features import compute_spatial_features
 from providers.posture_monitor import PostureMonitor
-from storage.calibration_store import CalibData, load_calibration
-from storage.tare_store import load_tare, save_tare
+from storage.experiment_recorder import ExperimentRecorder
+from storage.gain_points import GainPointStore
 
 logger = logging.getLogger(__name__)
 
-_STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
-_CALIB_PATH = _STORAGE_DIR / "calibration.json"
-_TARE_PATH = _STORAGE_DIR / "tare.json"
+_EDGE_ROOT = Path(__file__).resolve().parent.parent.parent
+_STORAGE_DIR = _EDGE_ROOT / "src" / "storage"
+_BLOCK_CURVES_PATH = _STORAGE_DIR / "block_curves.json"
 _BASELINE_PATH = _STORAGE_DIR / "baseline_raw.json"
+_EXPERIMENTS_DIR = _EDGE_ROOT / "data" / "experiments"
+_GAIN_POINTS_PATH = _EDGE_ROOT / "data" / "gain_points.json"
+# Trecho final usado para registrar um ponto de ajuste de ganho (só frames estáveis)
+GAIN_CAPTURE_S = 5.0
+
+WEIGHT_STATUS: dict[ReadingState, str] = {
+    ReadingState.SEM_CARGA: "NO_LOAD",
+    ReadingState.CARGA_DETECTADA: "LOAD_DETECTED",
+    ReadingState.ESTABILIZANDO: "STABILIZING",
+    ReadingState.MOVIMENTO: "MOVEMENT",
+    ReadingState.ESTAVEL: "NOT_VALIDATED",
+    ReadingState.MEDICAO_VALIDA: "VALID",
+}
 
 
-def _resolve_display_weight(
-    state: ReadingState,
-    current_net_mass: float,
-    last_valid_weight: float,
-) -> tuple[float, float, str, bool]:
-    """Determina o peso e o label textual conforme a FSM de estabilidade."""
-    if state == ReadingState.NO_LOAD:
-        return 0.0, 0.0, "SEM CARGA", False
-    if state == ReadingState.MOVING:
-        msg = "PACIENTE EM MOVIMENTO — AGUARDANDO ESTABILIZAÇÃO"
-        return last_valid_weight, last_valid_weight, msg, False
-    if state == ReadingState.STABILIZING:
-        return last_valid_weight, last_valid_weight, "ESTABILIZANDO", False
-    return current_net_mass, current_net_mass, "MEDIÇÃO ESTÁVEL", True
+def _round(value: float | None, digits: int) -> float | None:
+    return None if value is None else round(float(value), digits)
 
 
 class AcquisitionWorker:
-    """Worker autônomo 24/7 responsável por:
-    1. Leitura contínua dos frames da manta sensora a ~40 Hz.
-    2. Execução do pipeline matemático e cálculo do peso estável (janela móvel 60s).
-    3. Compensação de creep/drift temporal dos FSRs.
-    4. Auto-rezero quando manta desocupada por >30s.
-    5. Monitoramento postural e cálculo do tempo de permanência de decúbito.
-    6. Ingestão periódica a cada 60s no SQLite e registro de eventos imediatos.
-    7. Transmissão em tempo real via callbacks/WebSocket.
+    """Worker autônomo 24/7.
+
+    Separa aquisição, estabilização e conversão em massa: a aquisição e a tara não
+    dependem do modelo de calibração, e o peso só é publicado como válido quando a
+    máquina de estados e as flags de qualidade permitem.
     """
 
     def __init__(
@@ -70,8 +66,12 @@ class AcquisitionWorker:
         maca_id: str = "MACA-01",
         reader: BaseFrameReader | None = None,
         broadcast_callback: Callable[[dict[str, Any]], None] | None = None,
-        baseline_compensator: MatBaselineCompensator | None = None,
-        stability_detector: ReadingStabilityDetector | None = None,
+        baseline: SpatialBaseline | None = None,
+        models: ModelRegistry | None = None,
+        recorder: ExperimentRecorder | None = None,
+        params: CalibrationParams | None = None,
+        active_blocks: list[int] | None = None,
+        gain_points: GainPointStore | None = None,
     ) -> None:
         self._db = db
         self._maca_id = maca_id
@@ -80,48 +80,45 @@ class AcquisitionWorker:
         self._thread: threading.Thread | None = None
         self._state_lock = threading.Lock()
 
-        # Configurações e Armazenamento
-        self.params = CalibrationParams()
-        self.calib = load_calibration(_CALIB_PATH)
-        self.ml_predictor = MLWeightPredictor()
-        self._tare_offset_kg = load_tare(_TARE_PATH)
-        self._tare_pending = False
-        self._tare_samples: list[float] = []
+        self.params = params or CalibrationParams()
+        if params is None:
+            self.params.apply_overrides(config_manager.get("acquisition", {}) or {})
 
-        # Compensação de Baseline e Estabilidade
-        self.baseline_compensator = (
-            baseline_compensator
-            if baseline_compensator is not None
-            else MatBaselineCompensator(baseline_path=_BASELINE_PATH)
-        )
-        self.stability_detector = (
-            stability_detector
-            if stability_detector is not None
-            else ReadingStabilityDetector(
-                t_min_s=self.params.stability_tmin_seconds,
-                epsilon_s=self.params.stability_epsilon_raw,
-                d_max_matrix=self.params.motion_dmax_matrix,
-            )
-        )
+        # Só as células dos blocos ativos entram na medição; o RAW gravado é sempre a manta inteira
+        blocks = active_blocks or config_manager.get("active_blocks") or list(BLOCK_REGIONS)
+        self.active_blocks = sorted(int(b) for b in blocks if int(b) in BLOCK_REGIONS)
+        self._mask = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
+        for bid in self.active_blocks:
+            self._mask[BLOCK_REGIONS[bid]] = 1.0
 
-        # Compensação de Creep e Auto-ReZero
-        self._creep = CreepCompensator(
-            settle_frames=15,
-            max_drift_kg_per_sec=0.3,
-            step_threshold_kg=FAST_RESET_THRESHOLD_KG,
+        self.baseline = baseline or SpatialBaseline(_BASELINE_PATH)
+        self.state_machine = ReadingStateMachine(self.params)
+        # Só as curvas por bloco geradas dos CSVs de docs/ valem. O modelo de ML
+        # (weight_model.joblib) e o calibration.json antigo continuam no disco, mas
+        # não são carregados (pedido de 09/10: ignorar as calibrações anteriores).
+        self.models = models or ModelRegistry(
+            {"block_curves": BlockCurveModel(_BLOCK_CURVES_PATH)},
+            selection=str(config_manager.get("mass_model", "auto")),
         )
-        self._auto_rezero = AutoReZero(
-            empty_threshold_kg=0.5,
-            empty_duration_seconds=30.0,
-        )
+        self.recorder = recorder or ExperimentRecorder(_EXPERIMENTS_DIR)
+        self.gain_points = gain_points or GainPointStore(_GAIN_POINTS_PATH)
 
-        # Monitor de Postura
+        self._tare_requested = False
+        self._empty_since: float | None = None
+        self._auto_tare_done = False
+        self._raw_window: deque[tuple[float, np.ndarray]] = deque()
+        self._full_window: deque[tuple[float, np.ndarray]] = deque()  # corrigido, manta inteira
+        self._capture_window: deque[tuple[float, bool, np.ndarray]] = deque()  # (t, estável, corrigido)
+        self._last_valid: dict[str, Any] | None = None
+        self._last_telemetry_time = time.monotonic()
+        self._last_recorded_posture: str | None = None
+        self._last_posture_change_time = time.monotonic()
+
         self.monitor = PostureMonitor(
             tolerance=self.params.posture_tolerance,
             timeout_seconds=self.params.posture_timeout_seconds,
         )
 
-        # Driver de Hardware
         if reader is not None:
             self._reader = reader
         else:
@@ -131,22 +128,22 @@ class AcquisitionWorker:
                 logger.warning("USB HID indisponível (%s) — iniciando leitor simulado de fallback", err)
                 self._reader = FakeSerialReader()
 
-        # Estado ao vivo (Live State)
         self._live_state: dict[str, Any] = {
-            "heatmap": [],
-            "weight_kg": 0.0,
-            "force_n": 0.0,
-            "static_seconds": 0,
-            "is_alert": False,
+            "maca_id": self._maca_id,
             "status": "iniciando",
+            "heatmap": [],
+            "weight_kg": None,
+            "weight_status": WEIGHT_STATUS[ReadingState.SEM_CARGA],
+            "state_id": ReadingState.SEM_CARGA.value,
+            "state_label": STATE_LABELS[ReadingState.SEM_CARGA],
+            "stable": False,
+            "movement": False,
             "is_locked": False,
             "locked_weight_kg": 0.0,
+            "last_valid_weight_kg": None,
             "stable_progress_pct": 0.0,
-            "state_id": ReadingState.NO_LOAD.value,
-            "state_label": "SEM CARGA",
-            "matrix_delta": 0.0,
-            "temporal_delta": 0.0,
-            "dispersion_sigma": 0.0,
+            "static_seconds": 0,
+            "is_alert": False,
             "cop": {"row": 0.0, "col": 0.0},
             "posture_info": {
                 "posture": "Leito Livre",
@@ -156,8 +153,9 @@ class AcquisitionWorker:
             },
         }
 
+    # ------------------------------------------------------------- ciclo de vida
+
     def start(self) -> None:
-        """Inicia a thread de leitura contínua."""
         if self._is_running:
             return
         self._is_running = True
@@ -166,186 +164,368 @@ class AcquisitionWorker:
         logger.info("AcquisitionWorker iniciado (Maca: %s)", self._maca_id)
 
     def stop(self) -> None:
-        """Encerra o worker de forma graciosa."""
         self._is_running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         if self._reader:
             self._reader.close()
+        self.recorder.stop()
         logger.info("AcquisitionWorker finalizado")
 
+    # ------------------------------------------------------------------ comandos
+
     def trigger_tare(self) -> None:
-        """Solicita calibração de tara na próxima amostragem."""
+        """Pede uma tara manual de T_TARE segundos. O operador garante a maca vazia."""
         with self._state_lock:
-            self._tare_pending = True
-            self._tare_samples.clear()
-        logger.info("Amostragem de tara iniciada")
+            self._tare_requested = True
+        logger.info("Tara manual solicitada")
 
     def get_live_snapshot(self) -> dict[str, Any]:
-        """Retorna uma cópia thread-safe do estado atual."""
         with self._state_lock:
             return dict(self._live_state)
 
-    def update_param(self, key: str, value: float) -> None:
-        """Atualiza parâmetro de calibração em runtime e sincroniza estabilidade."""
+    def update_param(self, key: str, value: float, persist: bool = False) -> None:
+        """Atualiza parâmetro em runtime; com persist=True grava em config.json ('acquisition')."""
         self.params.update(key, value)
         snap = self.params.snapshot()
         self.monitor.update_tolerance(snap["posture_tolerance"])
         self.monitor.update_timeout(int(snap["posture_timeout_seconds"]))
-        if key == "stability_tmin_seconds":
-            self.stability_detector.t_min_s = float(value)
-        elif key == "motion_dmax_matrix":
-            self.stability_detector.d_max_matrix = float(value)
-        elif key == "stability_epsilon_raw":
-            self.stability_detector.epsilon_s = float(value)
+        if persist:
+            current = dict(config_manager.get("acquisition", {}) or {})
+            current[key] = snap[key]
+            config_manager.update_and_save({"acquisition": current})
+
+    def extraction(self) -> dict[str, Any] | None:
+        """Extração da janela atual célula a célula, com todos os setores pela curva de cada um.
+
+        Usa a média corrigida da manta inteira na janela de estabilidade (a mesma
+        filtragem do modelo); setores fora de active_blocks aparecem, mas não somam.
+        """
+        model = self.models.active()
+        if not isinstance(model, BlockCurveModel) or not model.is_ready:
+            return None
+        corrected = self.window_corrected()
+        live = self.get_live_snapshot()
+        return {
+            "timestamp": live.get("timestamp"),
+            "state_id": live.get("state_id"),
+            "state_label": live.get("state_label"),
+            "weight_status": live.get("weight_status"),
+            "weight_kg": live.get("weight_kg"),
+            "estimated_mass_kg": live.get("estimated_mass_kg"),
+            "stable_progress_pct": live.get("stable_progress_pct"),
+            "measurement_quality": live.get("measurement_quality"),
+            "calibration_version": model.calibration_version,
+            "active_blocks": self.active_blocks,
+            "tare_id": live.get("tare_id"),
+            **model.breakdown(corrected, self.active_blocks),
+        }
+
+    def window_corrected(self) -> np.ndarray:
+        """Média do RAW corrigido da manta inteira na janela de estabilidade."""
+        frames = [m for _, m in list(self._full_window)]
+        return window_mean(frames, np.zeros((HID_ROWS, HID_COLS)))
+
+    def stable_capture(self, min_frames: int = 3) -> tuple[np.ndarray, int, float] | None:
+        """Média do RAW corrigido da manta inteira nos frames estáveis dos últimos GAIN_CAPTURE_S.
+
+        Só devolve algo se o frame mais recente também for estável. Retorna
+        (matriz média, número de frames, duração coberta em s).
+        """
+        window = list(self._capture_window)
+        if not window or not window[-1][1]:
+            return None
+        frames = [(t, m) for t, ok, m in window if ok]
+        if len(frames) < min_frames:
+            return None
+        mean = np.mean(np.stack([m for _, m in frames]), axis=0).astype(np.float64)
+        return mean, len(frames), frames[-1][0] - frames[0][0]
+
+    def configuration_id(self) -> str:
+        return self.params.configuration_id(extra={"active_blocks": self.active_blocks})
+
+    def tare_status(self) -> dict[str, Any]:
+        record = self.baseline.record
+        return {
+            "collecting": self.baseline.is_collecting or self._tare_requested,
+            "t_tare_s": self.params.t_tare_s,
+            "tare_ok": self.baseline.has_baseline,
+            "baseline_ok": self.baseline.is_baseline_ok(self.params.baseline_std_max_raw),
+            "record": asdict(record) if record else None,
+        }
+
+    # -------------------------------------------------------------------- frame
+
+    def process_frame(self, raw: np.ndarray, now: float, connected: bool = True) -> dict[str, Any]:
+        """Processa um frame RAW e devolve o estado ao vivo. Não depende de thread."""
+        p = self.params.snapshot()
+        configuration_id = self.configuration_id()
+        model = self.models.active()
+        model_version = model.model_version if model else "none"
+        missing = raw.shape != (HID_ROWS, HID_COLS)
+        if missing:
+            raw = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
+
+        # Baseline / tara
+        with self._state_lock:
+            tare_requested, self._tare_requested = self._tare_requested, False
+        if tare_requested:
+            self.baseline.start_tare(now, p["t_tare_s"], automatic=False)
+        if self.baseline.is_collecting and self.baseline.feed(raw, now, configuration_id, model_version):
+            self.state_machine.reset()
+            self._raw_window.clear()
+            self._full_window.clear()
+            self._capture_window.clear()
+            self._auto_tare_done = True
+
+        corrected_full = self.baseline.correct(raw)
+        corrected = corrected_full * self._mask
+        raw_measured = raw * self._mask
+
+        # Filtragem temporal, movimento e estabilidade
+        state = self.state_machine.update(corrected, now)
+        metrics = self.state_machine.metrics
+        self._raw_window.append((now, raw_measured.astype(np.float32)))
+        while self._raw_window and self._raw_window[0][0] < now - p["stability_window_s"]:
+            self._raw_window.popleft()
+        self._full_window.append((now, corrected_full.astype(np.float32)))
+        while self._full_window and self._full_window[0][0] < now - p["stability_window_s"]:
+            self._full_window.popleft()
+        frame = WindowFrame(
+            raw_mean=window_mean([m for _, m in self._raw_window], raw_measured),
+            corrected_mean=window_mean(self.state_machine.window_frames, corrected),
+        )
+
+        self._handle_auto_tare(state, now, p, hardware_ok=connected and not missing)
+
+        # Modelo de calibração
+        estimate: MassEstimate | None = None
+        if state != ReadingState.SEM_CARGA and model is not None:
+            estimate = model.estimate(frame)
+
+        # Validação da medição
+        n_saturated = saturated_cells(raw_measured, p["saturation_raw"])
+        flags = QualityFlags(
+            tare_ok=self.baseline.has_baseline,
+            baseline_ok=self.baseline.is_baseline_ok(p["baseline_std_max_raw"]),
+            signal_stable=metrics.signal_stable,
+            movement=metrics.movement,
+            saturation=n_saturated > 0,
+            missing_cells=missing or not connected,
+            out_of_calibration=bool(estimate and estimate.out_of_calibration),
+            low_sensitivity=bool(estimate and estimate.low_sensitivity),
+            model_valid=bool(estimate and estimate.model_valid and estimate.mass_kg is not None),
+        )
+        state = self.state_machine.set_validated(flags.weight_valid)
+        stable_now = state in (ReadingState.ESTAVEL, ReadingState.MEDICAO_VALIDA) and not metrics.movement
+        self._capture_window.append((now, stable_now, corrected_full.astype(np.float32)))
+        while self._capture_window and self._capture_window[0][0] < now - GAIN_CAPTURE_S:
+            self._capture_window.popleft()
+        weight_status = WEIGHT_STATUS[state]
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        weight_kg: float | None = None
+        if state == ReadingState.MEDICAO_VALIDA and estimate is not None and estimate.mass_kg is not None:
+            weight_kg = estimate.mass_kg
+            self._last_valid = {
+                "weight_kg": round(weight_kg, 2),
+                "timestamp": timestamp,
+                "stabilization_time_s": _round(metrics.stabilization_time_s, 2),
+                "calibration_version": estimate.calibration_version,
+            }
+        elif state == ReadingState.SEM_CARGA:
+            self._last_valid = None
+
+        features = compute_spatial_features(corrected)
+        # Mapa de calor e postura com a manta inteira, para posicionar a carga
+        display = apply_deadzone(corrected_full, p["deadzone_threshold"])
+
+        # Postura e prevenção de LPP
+        self.monitor.update_tolerance(p["posture_tolerance"])
+        self.monitor.update_timeout(int(p["posture_timeout_seconds"]))
+        alert = self.monitor.update(display)
+        posture_info = self.monitor.classify_posture(display)
+        max_val = float(np.max(display))
+        normalized_map = (display / max_val if max_val > 0 else display).tolist()
+
+        tare_record = self.baseline.record
+        last_valid_kg = self._last_valid["weight_kg"] if self._last_valid else None
+        live = {
+            "maca_id": self._maca_id,
+            "timestamp": timestamp,
+            "status": "conectado" if connected else "desconectado",
+            "software_version": SOFTWARE_VERSION,
+            # Item 17 das orientações
+            "weight_kg": _round(weight_kg, 2),
+            "weight_status": weight_status,
+            "stable": metrics.signal_stable,
+            "stabilization_time_s": _round(metrics.stabilization_time_s, 2),
+            "movement": metrics.movement,
+            "measurement_quality": flags.as_dict(),
+            "calibration_version": estimate.calibration_version if estimate else (model.calibration_version if model else None),
+            "model_version": model_version,
+            "model_kind": model.kind if model else None,
+            "configuration_id": configuration_id,
+            "active_blocks": self.active_blocks,
+            "tare_id": tare_record.tare_id if tare_record else None,
+            "tare_in_progress": self.baseline.is_collecting,
+            "last_valid": self._last_valid,
+            "last_valid_weight_kg": last_valid_kg,
+            # Estimativa sem validação, só para análise experimental
+            "estimated_mass_kg": _round(estimate.mass_kg if estimate else None, 2),
+            # Estado e métricas
+            "state_id": state.value,
+            "state_label": STATE_LABELS[state],
+            "stable_progress_pct": round(metrics.stable_progress_pct, 1),
+            "is_locked": weight_status == "VALID",
+            "locked_weight_kg": last_valid_kg or 0.0,
+            "total_raw": round(metrics.total_raw, 1),
+            "raw_mean": round(metrics.window_mean, 1),
+            "raw_std": round(metrics.window_std, 2),
+            "delta": _round(metrics.delta, 2),
+            "movement_index": _round(metrics.movement_index, 4),
+            "active_cells": features.active_cells,
+            "center_x": round(features.center_x, 2),
+            "center_y": round(features.center_y, 2),
+            "spatial_dispersion": round(features.spatial_dispersion, 2),
+            "saturated_cells": n_saturated,
+            # Postura e interface
+            "heatmap": normalized_map,
+            "cop": {"row": round(features.center_y, 2), "col": round(features.center_x, 2)},
+            "static_seconds": int(self.monitor.elapsed_seconds),
+            "is_alert": alert,
+            "posture_info": posture_info,
+        }
+
+        with self._state_lock:
+            self._live_state = live
+
+        if self.recorder.active:
+            self.recorder.record(
+                raw,
+                {
+                    "timestamp": timestamp,
+                    "configuration_id": configuration_id,
+                    "tare_id": live["tare_id"],
+                    "state": state.value,
+                    "stability_flag": metrics.signal_stable,
+                    "movement_flag": metrics.movement,
+                    "saturation_flag": flags.saturation,
+                    "saturated_cells": n_saturated,
+                    "raw_sum": float(np.sum(raw)),
+                    "total_raw": metrics.total_raw,
+                    "raw_mean": metrics.window_mean,
+                    "raw_std": metrics.window_std,
+                    "delta": metrics.delta,
+                    "movement_index": metrics.movement_index,
+                    "active_cells": features.active_cells,
+                    "center_x": features.center_x,
+                    "center_y": features.center_y,
+                    "spatial_dispersion": features.spatial_dispersion,
+                    "stabilization_time_s": metrics.stabilization_time_s,
+                    "calibration_version": live["calibration_version"],
+                    "model_version": model_version,
+                    "estimated_mass": estimate.mass_kg if estimate else None,
+                    "prediction_valid": flags.weight_valid,
+                    "weight_status": weight_status,
+                },
+                self.baseline.mean_matrix if tare_record else None,
+                self.baseline.std_matrix if tare_record else None,
+            )
+
+        self._persist_events(now, live, posture_info, alert, max_val)
+        return live
+
+    # ----------------------------------------------------------------- auxiliares
+
+    def _handle_auto_tare(self, state: ReadingState, now: float, p: dict[str, Any], hardware_ok: bool) -> None:
+        """Tara automática uma vez por período de maca vazia; cancelada se surgir carga.
+
+        Frames zerados de manta desconectada não contam como maca vazia.
+        """
+        if not hardware_ok:
+            self._empty_since = None
+            if self.baseline.is_collecting and self.baseline.is_automatic:
+                self.baseline.cancel_tare("manta desconectada durante a tara automática")
+            return
+        if state != ReadingState.SEM_CARGA:
+            self._empty_since = None
+            self._auto_tare_done = False
+            if self.baseline.is_collecting and self.baseline.is_automatic:
+                self.baseline.cancel_tare("carga detectada durante a tara automática")
+            return
+        if self._auto_tare_done or self.baseline.is_collecting:
+            return
+        if self._empty_since is None:
+            self._empty_since = now
+            return
+        if now - self._empty_since >= p["auto_rezero_empty_s"]:
+            self.baseline.start_tare(now, p["t_tare_s"], automatic=True)
+            self._auto_tare_done = True
+
+    def _persist_events(
+        self,
+        now: float,
+        live: dict[str, Any],
+        posture_info: dict[str, Any],
+        alert: bool,
+        max_val: float,
+    ) -> None:
+        # Telemetria a cada 60 s, só com peso validado
+        if now - self._last_telemetry_time >= 60.0 and live["weight_status"] == "VALID":
+            self._last_telemetry_time = now
+            asym = posture_info.get("asymmetry_pct", 0.0)
+            self._db.enqueue_telemetry(
+                timestamp=live["timestamp"],
+                maca_id=self._maca_id,
+                peso_kg=live["weight_kg"],
+                indice_postural=round(asym / 100.0, 3) if asym else 0.0,
+                tempo_estatico_seg=int(self.monitor.elapsed_seconds),
+                status_alerta=alert,
+                payload={
+                    "relief_score": posture_info.get("relief_score", 100),
+                    "weight_status": live["weight_status"],
+                    "stabilization_time_s": live["stabilization_time_s"],
+                    "calibration_version": live["calibration_version"],
+                    "configuration_id": live["configuration_id"],
+                },
+            )
+
+        # Eventos de transição postural
+        curr_pos = posture_info.get("posture", "Leito Livre")
+        if self._last_recorded_posture is None:
+            self._last_recorded_posture = curr_pos
+            self._last_posture_change_time = now
+        elif curr_pos != self._last_recorded_posture and curr_pos != "Leito Livre":
+            dur_seg = int(now - self._last_posture_change_time)
+            if dur_seg >= 15:
+                self._db.record_posture_event(
+                    timestamp=live["timestamp"],
+                    maca_id=self._maca_id,
+                    postura_detectada=curr_pos,
+                    postura_anterior=self._last_recorded_posture,
+                    duracao_anterior_seg=dur_seg,
+                    regiao_pico=posture_info.get("asymmetry_label"),
+                    pico_pct=round(max_val, 1),
+                    houve_alerta=alert,
+                )
+                self._last_recorded_posture = curr_pos
+                self._last_posture_change_time = now
 
     def _loop(self) -> None:
-        previous_weight = 0.0
-        last_valid_weight = 0.0
-        last_telemetry_time = time.monotonic()
-        last_recorded_posture: str | None = None
-        last_posture_change_time = time.monotonic()
-
         while self._is_running:
             try:
                 now = time.monotonic()
                 connected = self._reader.is_connected()
-                raw_adc = self._reader.read_frame()
-
-                # 1. FSM de estabilidade da aquisição
-                stability_state = self.stability_detector.update(raw_adc, now)
-
-                # 2. Correção de baseline matricial B(t)
-                corrected_adc = correct_baseline(raw_adc, self.baseline_compensator)
-
-                # 3. Auto-ReZero de baseline quando maca vazia por >=30s
-                if self.baseline_compensator.evaluate_auto_rezero(raw_adc, now, min_empty_seconds=30.0):
-                    self.baseline_compensator.update_baseline(raw_adc)
-                    self._tare_offset_kg = 0.0
-                    self._creep.reset()
-
-                # 4. Pipeline Físico (deadzone, força e estimativa bruta)
-                force_matrix = compute_force_matrix(corrected_adc, self.params)
-                raw_mass = compute_total_mass(force_matrix, self.calib, self.ml_predictor)
-                snap = self.params.snapshot()
-                smoothed_mass = apply_ema(raw_mass, previous_weight, snap["ema_alpha"])
-                previous_weight = smoothed_mass
-
-                # 5. Compensação de Creep
-                compensated_mass = self._creep.update(smoothed_mass)
-                net_mass = max(0.0, compensated_mass - self._tare_offset_kg)
-                force_n = compute_total_force(force_matrix, self.calib)
-
-                # 6. Centro de Pressão 2D real
-                cop_row, cop_col = compute_cop(force_matrix)
-
-                # 7. Decisão de Leitura via FSM (congelamento em movimento)
-                displayed_weight, last_valid_weight, state_label, weight_locked = _resolve_display_weight(
-                    stability_state, net_mass, last_valid_weight
-                )
-                locked_weight_kg = displayed_weight if weight_locked else last_valid_weight
-                stable_progress_pct = self.stability_detector.get_progress_pct(now)
-
-                # 8. Classificação Postural e Prevenção LPP
-                self.monitor.update_tolerance(snap["posture_tolerance"])
-                self.monitor.update_timeout(int(snap["posture_timeout_seconds"]))
-                alert = self.monitor.update(force_matrix)
-                posture_info = self.monitor.classify_posture(force_matrix)
-
-                # 9. Normalização do Heatmap (0-1)
-                max_val = float(np.max(force_matrix))
-                normalized_map = (force_matrix / max_val if max_val > 0 else force_matrix).tolist()
-
-                # 10. Processamento de Tara manual
-                tare_to_save: float | None = None
-                with self._state_lock:
-                    if self._tare_pending:
-                        self._tare_samples.append(smoothed_mass)
-                        if len(self._tare_samples) >= TARE_SAMPLE_COUNT:
-                            self._tare_offset_kg = float(np.mean(self._tare_samples))
-                            tare_to_save = self._tare_offset_kg
-                            self._tare_pending = False
-                            self._tare_samples.clear()
-
-                    self._live_state = {
-                        "maca_id": self._maca_id,
-                        "heatmap": normalized_map,
-                        "weight_kg": round(displayed_weight, 2),
-                        "force_n": round(force_n, 1),
-                        "static_seconds": int(self.monitor.elapsed_seconds),
-                        "is_alert": alert,
-                        "status": "conectado" if connected else "desconectado",
-                        "is_locked": weight_locked,
-                        "locked_weight_kg": round(locked_weight_kg, 2),
-                        "stable_progress_pct": round(stable_progress_pct, 1),
-                        "state_id": stability_state.value,
-                        "state_label": state_label,
-                        "matrix_delta": round(self.stability_detector.matrix_delta, 1),
-                        "temporal_delta": round(self.stability_detector.temporal_delta, 1),
-                        "dispersion_sigma": round(self.stability_detector.dispersion_sigma, 2),
-                        "cop": {"row": round(cop_row, 2), "col": round(cop_col, 2)},
-                        "posture_info": posture_info,
-                    }
-
-                if tare_to_save is not None:
-                    save_tare(tare_to_save, _TARE_PATH)
-
-                # 1. Ingestão periódica a cada 60s no SQLite
-                if now - last_telemetry_time >= 60.0 and displayed_weight > 0.5:
-                    last_telemetry_time = now
-                    asym = posture_info.get("asymmetry_pct", 0.0)
-                    self._db.enqueue_telemetry(
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        maca_id=self._maca_id,
-                        peso_kg=round(displayed_weight, 2),
-                        indice_postural=round(asym / 100.0, 3) if asym else 0.0,
-                        tempo_estatico_seg=int(self.monitor.elapsed_seconds),
-                        status_alerta=alert,
-                        payload={"relief_score": posture_info.get("relief_score", 100)},
-                    )
-
-                # 2. Registro imediato de eventos de transição postural
-                curr_pos = posture_info.get("posture", "Leito Livre")
-                if last_recorded_posture is None:
-                    last_recorded_posture = curr_pos
-                    last_posture_change_time = now
-                elif curr_pos != last_recorded_posture and curr_pos != "Leito Livre":
-                    dur_seg = int(now - last_posture_change_time)
-                    if dur_seg >= 15:
-                        self._db.record_posture_event(
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            maca_id=self._maca_id,
-                            postura_detectada=curr_pos,
-                            postura_anterior=last_recorded_posture,
-                            duracao_anterior_seg=dur_seg,
-                            regiao_pico=posture_info.get("asymmetry_label"),
-                            pico_pct=round(max_val, 1),
-                            houve_alerta=alert,
-                        )
-                        last_recorded_posture = curr_pos
-                        last_posture_change_time = now
-
-                # 3. Broadcast do estado ao vivo via WebSocket
+                raw = self._reader.read_frame()
+                live = self.process_frame(raw, now, connected)
                 if self._broadcast_callback is not None:
                     try:
-                        self._broadcast_callback(self._live_state)
+                        self._broadcast_callback(live)
                     except Exception as b_err:
                         logger.debug("Falha no broadcast WebSocket: %s", b_err)
-
             except Exception as err:
-                logger.error("Erro no loop do AcquisitionWorker: %s", err)
+                logger.exception("Erro no loop do AcquisitionWorker: %s", err)
                 with self._state_lock:
                     self._live_state["status"] = f"erro: {err}"
                 time.sleep(0.5)
-
-    def _execute_auto_tare(self, current_smoothed_mass: float) -> None:
-        """Executa re-zero automático quando a manta está vazia por tempo suficiente."""
-        old_tare = self._tare_offset_kg
-        self._tare_offset_kg = current_smoothed_mass
-        self._creep.reset()
-        save_tare(self._tare_offset_kg, _TARE_PATH)
-        logger.info(
-            "Auto-ReZero executado: tara %.4f → %.4f kg",
-            old_tare,
-            self._tare_offset_kg,
-        )

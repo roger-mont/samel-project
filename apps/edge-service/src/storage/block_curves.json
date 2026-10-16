@@ -1,0 +1,3171 @@
+{
+  "calibration_version": "MC-2026-002-PROV",
+  "model_version": "block_curves/pchip-isotonic-v2-setor",
+  "provisional": true,
+  "generated_at": "2026-10-15T13:46:10.074989+00:00",
+  "generated_by": "apps/edge-service/scripts/gerar_curvas_bloco.py",
+  "method": {
+    "direction": "UP (a descida fica em down_curve_not_used, só para estudo)",
+    "plateau_value": "média dos últimos 50% de max(0, RAW_Amostra − Baseline_Bij) do patamar",
+    "cell_combination": "média das células do setor em cada massa em comum",
+    "monotonic_fit": "regressão isotônica (PAVA) do RAW em função da massa",
+    "interpolation": "PCHIP sobre os nós RAW → massa",
+    "blocks": "uma curva por setor, da(s) célula(s) calibrada(s) no setor; sem célula, curva global",
+    "total_mass": "M = Σ_s α_s · Σ_{ij∈s} f_s(x_ij)"
+  },
+  "notes": [
+    "Uma célula por setor (duas no setor 2): a curva representa o setor inteiro sem medir a variação entre células do mesmo setor. As duas células do setor 2 diferem em cerca de 90 g na mesma leitura.",
+    "Faixa calibrada: até mass_max_valid por célula; acima de raw_max_valid a leitura é OUT_OF_CALIBRATION.",
+    "Ganhos α_s = 1 até haver experimento de carga distribuída (scripts/ajustar_ganho_massa_total.py).",
+    "Calibrações anteriores (calibration.json, weight_model.joblib, data/sessions) não são usadas."
+  ],
+  "sources": [
+    {
+      "file": "docs/3. Célula 9x53/calibracao_memoria - média 1 - 9X53.csv",
+      "sha1": "80397b818fad646d66f7363ac1827a44cd936c81",
+      "cell": "9x53",
+      "row": 9,
+      "column": 53,
+      "block": 1,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.018,
+          "raw_corrected": 26.3505,
+          "raw_std_tail": 0.8254,
+          "raw_corrected_csv": 26.85,
+          "baseline": 0.0,
+          "stabilization_time_s": 3.21,
+          "n": 194
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.025,
+          "raw_corrected": 41.732,
+          "raw_std_tail": 0.7932,
+          "raw_corrected_csv": 41.19,
+          "baseline": 0.0,
+          "stabilization_time_s": 3.11,
+          "n": 194
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.05,
+          "raw_corrected": 61.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 61.29,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.075,
+          "raw_corrected": 73.6804,
+          "raw_std_tail": 0.4663,
+          "raw_corrected_csv": 73.36,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.1,
+          "raw_corrected": 82.9794,
+          "raw_std_tail": 0.1421,
+          "raw_corrected_csv": 82.95,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.125,
+          "raw_corrected": 96.1959,
+          "raw_std_tail": 0.3969,
+          "raw_corrected_csv": 96.11,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.15,
+          "raw_corrected": 106.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 106.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 194
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.175,
+          "raw_corrected": 113.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 113.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.2,
+          "raw_corrected": 117.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 117.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.175,
+          "raw_corrected": 113.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 112.51,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.15,
+          "raw_corrected": 108.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 108.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.125,
+          "raw_corrected": 102.8557,
+          "raw_std_tail": 0.3514,
+          "raw_corrected_csv": 102.84,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.1,
+          "raw_corrected": 90.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 90.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 194
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.075,
+          "raw_corrected": 83.0619,
+          "raw_std_tail": 0.2409,
+          "raw_corrected_csv": 83.09,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.05,
+          "raw_corrected": 70.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 70.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 194
+        },
+        {
+          "ponto_idx": 16,
+          "mass_kg": 0.025,
+          "raw_corrected": 50.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 50.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 17,
+          "mass_kg": 0.018,
+          "raw_corrected": 41.0309,
+          "raw_std_tail": 0.1731,
+          "raw_corrected_csv": 41.02,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 18,
+          "mass_kg": 0.0,
+          "raw_corrected": 0.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 0.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        }
+      ]
+    },
+    {
+      "file": "docs/4. Célula 12X34/calibracao_memoria - média 1 - 12x34.csv",
+      "sha1": "5ac557817096d7a517967abf06c9c13a29b5d41d",
+      "cell": "12x34",
+      "row": 12,
+      "column": 34,
+      "block": 2,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 12.0405,
+          "raw_std_tail": 4.6308,
+          "raw_corrected_csv": 13.26,
+          "baseline": 0.31,
+          "stabilization_time_s": 4.23,
+          "n": 193
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 44.3046,
+          "raw_std_tail": 0.4867,
+          "raw_corrected_csv": 43.94,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 192
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 49.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 49.94,
+          "baseline": 0.31,
+          "stabilization_time_s": 1.4,
+          "n": 193
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 57.6488,
+          "raw_std_tail": 1.7698,
+          "raw_corrected_csv": 56.41,
+          "baseline": 0.31,
+          "stabilization_time_s": 3.77,
+          "n": 193
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 65.9787,
+          "raw_std_tail": 0.9628,
+          "raw_corrected_csv": 65.03,
+          "baseline": 0.31,
+          "stabilization_time_s": 3.99,
+          "n": 193
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 61.4632,
+          "raw_std_tail": 0.4188,
+          "raw_corrected_csv": 61.32,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 63.9477,
+          "raw_std_tail": 0.6305,
+          "raw_corrected_csv": 63.82,
+          "baseline": 0.31,
+          "stabilization_time_s": 4.45,
+          "n": 193
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 68.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 68.56,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.225,
+          "raw_corrected": 72.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 72.56,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.25,
+          "raw_corrected": 73.4426,
+          "raw_std_tail": 0.4315,
+          "raw_corrected_csv": 73.59,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.52,
+          "n": 193
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.275,
+          "raw_corrected": 74.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 74.69,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.25,
+          "raw_corrected": 73.6281,
+          "raw_std_tail": 0.2409,
+          "raw_corrected_csv": 73.34,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.225,
+          "raw_corrected": 71.9065,
+          "raw_std_tail": 0.4119,
+          "raw_corrected_csv": 71.88,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.2,
+          "raw_corrected": 69.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 69.69,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.175,
+          "raw_corrected": 66.8463,
+          "raw_std_tail": 0.3631,
+          "raw_corrected_csv": 66.82,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 192
+        },
+        {
+          "ponto_idx": 16,
+          "mass_kg": 0.15,
+          "raw_corrected": 64.3601,
+          "raw_std_tail": 0.4702,
+          "raw_corrected_csv": 64.26,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.52,
+          "n": 193
+        },
+        {
+          "ponto_idx": 17,
+          "mass_kg": 0.125,
+          "raw_corrected": 63.2673,
+          "raw_std_tail": 0.494,
+          "raw_corrected_csv": 62.96,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 18,
+          "mass_kg": 0.1,
+          "raw_corrected": 61.2982,
+          "raw_std_tail": 0.4881,
+          "raw_corrected_csv": 61.32,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 19,
+          "mass_kg": 0.075,
+          "raw_corrected": 56.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 56.69,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 20,
+          "mass_kg": 0.05,
+          "raw_corrected": 47.2108,
+          "raw_std_tail": 0.4996,
+          "raw_corrected_csv": 47.51,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 192
+        },
+        {
+          "ponto_idx": 21,
+          "mass_kg": 0.025,
+          "raw_corrected": 36.7716,
+          "raw_std_tail": 0.2738,
+          "raw_corrected_csv": 36.94,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        }
+      ]
+    },
+    {
+      "file": "docs/5. Célula 12X37/calibracao_memoria - média 1 - 12x37.csv",
+      "sha1": "0e18ef99e6169bc57a85a68d90d4d200c052f44f",
+      "cell": "12x37",
+      "row": 12,
+      "column": 37,
+      "block": 2,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 0.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 0.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 9.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 9.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 62.0825,
+          "raw_std_tail": 0.7416,
+          "raw_corrected_csv": 61.25,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 86.9691,
+          "raw_std_tail": 0.1731,
+          "raw_corrected_csv": 86.54,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 95.2165,
+          "raw_std_tail": 0.4119,
+          "raw_corrected_csv": 95.42,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 99.1753,
+          "raw_std_tail": 0.3802,
+          "raw_corrected_csv": 99.09,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 103.7835,
+          "raw_std_tail": 0.4119,
+          "raw_corrected_csv": 103.89,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 193
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 107.7835,
+          "raw_std_tail": 0.4119,
+          "raw_corrected_csv": 107.39,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.225,
+          "raw_corrected": 110.732,
+          "raw_std_tail": 0.4429,
+          "raw_corrected_csv": 110.98,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.25,
+          "raw_corrected": 112.7732,
+          "raw_std_tail": 0.4188,
+          "raw_corrected_csv": 112.85,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.275,
+          "raw_corrected": 114.0309,
+          "raw_std_tail": 0.1731,
+          "raw_corrected_csv": 114.02,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.25,
+          "raw_corrected": 111.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 110.94,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.225,
+          "raw_corrected": 109.866,
+          "raw_std_tail": 0.3407,
+          "raw_corrected_csv": 109.93,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.2,
+          "raw_corrected": 101.0309,
+          "raw_std_tail": 1.2959,
+          "raw_corrected_csv": 101.06,
+          "baseline": 0.0,
+          "stabilization_time_s": 4.23,
+          "n": 193
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.175,
+          "raw_corrected": 102.8969,
+          "raw_std_tail": 0.3041,
+          "raw_corrected_csv": 102.84,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 16,
+          "mass_kg": 0.15,
+          "raw_corrected": 100.1443,
+          "raw_std_tail": 0.3514,
+          "raw_corrected_csv": 100.07,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 17,
+          "mass_kg": 0.125,
+          "raw_corrected": 98.1443,
+          "raw_std_tail": 0.3514,
+          "raw_corrected_csv": 98.16,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 18,
+          "mass_kg": 0.1,
+          "raw_corrected": 92.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 91.75,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 19,
+          "mass_kg": 0.075,
+          "raw_corrected": 84.5567,
+          "raw_std_tail": 0.4968,
+          "raw_corrected_csv": 84.89,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 20,
+          "mass_kg": 0.05,
+          "raw_corrected": 21.5876,
+          "raw_std_tail": 0.6849,
+          "raw_corrected_csv": 23.55,
+          "baseline": 0.0,
+          "stabilization_time_s": 1.75,
+          "n": 194
+        },
+        {
+          "ponto_idx": 21,
+          "mass_kg": 0.025,
+          "raw_corrected": 30.3854,
+          "raw_std_tail": 1.3947,
+          "raw_corrected_csv": 26.19,
+          "baseline": 0.0,
+          "stabilization_time_s": 3.23,
+          "n": 192
+        }
+      ]
+    },
+    {
+      "file": "docs/6. Célula 13X26/calibracao_memoria - média 1 - 13X26.csv",
+      "sha1": "5ac557817096d7a517967abf06c9c13a29b5d41d",
+      "cell": "13x26",
+      "row": 13,
+      "column": 26,
+      "block": 3,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 12.0405,
+          "raw_std_tail": 4.6308,
+          "raw_corrected_csv": 13.26,
+          "baseline": 0.31,
+          "stabilization_time_s": 4.23,
+          "n": 193
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 44.3046,
+          "raw_std_tail": 0.4867,
+          "raw_corrected_csv": 43.94,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 192
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 49.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 49.94,
+          "baseline": 0.31,
+          "stabilization_time_s": 1.4,
+          "n": 193
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 57.6488,
+          "raw_std_tail": 1.7698,
+          "raw_corrected_csv": 56.41,
+          "baseline": 0.31,
+          "stabilization_time_s": 3.77,
+          "n": 193
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 65.9787,
+          "raw_std_tail": 0.9628,
+          "raw_corrected_csv": 65.03,
+          "baseline": 0.31,
+          "stabilization_time_s": 3.99,
+          "n": 193
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 61.4632,
+          "raw_std_tail": 0.4188,
+          "raw_corrected_csv": 61.32,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 63.9477,
+          "raw_std_tail": 0.6305,
+          "raw_corrected_csv": 63.82,
+          "baseline": 0.31,
+          "stabilization_time_s": 4.45,
+          "n": 193
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 68.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 68.56,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.225,
+          "raw_corrected": 72.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 72.56,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.25,
+          "raw_corrected": 73.4426,
+          "raw_std_tail": 0.4315,
+          "raw_corrected_csv": 73.59,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.52,
+          "n": 193
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.275,
+          "raw_corrected": 74.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 74.69,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.25,
+          "raw_corrected": 73.6281,
+          "raw_std_tail": 0.2409,
+          "raw_corrected_csv": 73.34,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.225,
+          "raw_corrected": 71.9065,
+          "raw_std_tail": 0.4119,
+          "raw_corrected_csv": 71.88,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.2,
+          "raw_corrected": 69.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 69.69,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.175,
+          "raw_corrected": 66.8463,
+          "raw_std_tail": 0.3631,
+          "raw_corrected_csv": 66.82,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 192
+        },
+        {
+          "ponto_idx": 16,
+          "mass_kg": 0.15,
+          "raw_corrected": 64.3601,
+          "raw_std_tail": 0.4702,
+          "raw_corrected_csv": 64.26,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.52,
+          "n": 193
+        },
+        {
+          "ponto_idx": 17,
+          "mass_kg": 0.125,
+          "raw_corrected": 63.2673,
+          "raw_std_tail": 0.494,
+          "raw_corrected_csv": 62.96,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 18,
+          "mass_kg": 0.1,
+          "raw_corrected": 61.2982,
+          "raw_std_tail": 0.4881,
+          "raw_corrected_csv": 61.32,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 19,
+          "mass_kg": 0.075,
+          "raw_corrected": 56.69,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 56.69,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 20,
+          "mass_kg": 0.05,
+          "raw_corrected": 47.2108,
+          "raw_std_tail": 0.4996,
+          "raw_corrected_csv": 47.51,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.54,
+          "n": 192
+        },
+        {
+          "ponto_idx": 21,
+          "mass_kg": 0.025,
+          "raw_corrected": 36.7716,
+          "raw_std_tail": 0.2738,
+          "raw_corrected_csv": 36.94,
+          "baseline": 0.31,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        }
+      ]
+    },
+    {
+      "file": "docs/7. Célula 13X14/calibracao_memoria - média 1 - 13X14.csv",
+      "sha1": "b9083882c97b0aa4d294211a2a9b3551af2f2147",
+      "cell": "13x14",
+      "row": 13,
+      "column": 14,
+      "block": 4,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 0.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 0.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 30.5876,
+          "raw_std_tail": 0.4923,
+          "raw_corrected_csv": 30.31,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 51.0309,
+          "raw_std_tail": 0.1731,
+          "raw_corrected_csv": 51.02,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 60.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 60.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 68.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 68.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 76.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 75.92,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 84.3402,
+          "raw_std_tail": 0.4738,
+          "raw_corrected_csv": 84.17,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 92.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 92.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.175,
+          "raw_corrected": 87.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 86.94,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.15,
+          "raw_corrected": 81.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 81.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.125,
+          "raw_corrected": 74.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 74.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.1,
+          "raw_corrected": 63.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 63.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.075,
+          "raw_corrected": 54.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 54.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.05,
+          "raw_corrected": 30.1546,
+          "raw_std_tail": 0.3616,
+          "raw_corrected_csv": 30.25,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.025,
+          "raw_corrected": 0.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 0.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        }
+      ]
+    },
+    {
+      "file": "docs/8. Célula 26X11/calibracao_memoria - média 1 - 26X11.csv",
+      "sha1": "8bb1d9a0eada47c827203a9906575bc7ae823eb3",
+      "cell": "26x11",
+      "row": 26,
+      "column": 11,
+      "block": 5,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 0.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 0.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 12.9588,
+          "raw_std_tail": 0.1988,
+          "raw_corrected_csv": 12.73,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.94,
+          "n": 193
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 29.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 29.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 37.8041,
+          "raw_std_tail": 0.3969,
+          "raw_corrected_csv": 37.9,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 48.7423,
+          "raw_std_tail": 0.6466,
+          "raw_corrected_csv": 48.7,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 193
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 61.9588,
+          "raw_std_tail": 0.1988,
+          "raw_corrected_csv": 61.59,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 75.134,
+          "raw_std_tail": 0.3407,
+          "raw_corrected_csv": 75.39,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 92.9175,
+          "raw_std_tail": 0.7553,
+          "raw_corrected_csv": 92.64,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.225,
+          "raw_corrected": 103.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 102.73,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.25,
+          "raw_corrected": 118.9588,
+          "raw_std_tail": 0.1988,
+          "raw_corrected_csv": 118.74,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.225,
+          "raw_corrected": 117.9278,
+          "raw_std_tail": 0.2588,
+          "raw_corrected_csv": 117.85,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 193
+        },
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.2,
+          "raw_corrected": 103.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 103.22,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.175,
+          "raw_corrected": 105.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 105.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.15,
+          "raw_corrected": 81.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 80.78,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.125,
+          "raw_corrected": 71.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 70.97,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 194
+        },
+        {
+          "ponto_idx": 16,
+          "mass_kg": 0.1,
+          "raw_corrected": 55.2371,
+          "raw_std_tail": 0.4253,
+          "raw_corrected_csv": 55.52,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 17,
+          "mass_kg": 0.075,
+          "raw_corrected": 45.4433,
+          "raw_std_tail": 0.6575,
+          "raw_corrected_csv": 44.79,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        },
+        {
+          "ponto_idx": 18,
+          "mass_kg": 0.05,
+          "raw_corrected": 21.7732,
+          "raw_std_tail": 1.5565,
+          "raw_corrected_csv": 22.7,
+          "baseline": 0.0,
+          "stabilization_time_s": 3.39,
+          "n": 194
+        },
+        {
+          "ponto_idx": 19,
+          "mass_kg": 0.025,
+          "raw_corrected": 10.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 10.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 194
+        }
+      ]
+    },
+    {
+      "file": "docs/9. Célula 19X20/calibracao_memoria - 19X11 - Média 1.csv",
+      "sha1": "b6f9c27d46a45a58413981f22228964bab128366",
+      "cell": "19x20",
+      "row": 19,
+      "column": 20,
+      "block": 6,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 4.2245,
+          "raw_std_tail": 0.4172,
+          "raw_corrected_csv": 4.28,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 28.5612,
+          "raw_std_tail": 0.8929,
+          "raw_corrected_csv": 28.27,
+          "baseline": 0.0,
+          "stabilization_time_s": 4.13,
+          "n": 195
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 37.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 36.98,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 195
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 50.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 49.85,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 64.7143,
+          "raw_std_tail": 0.4518,
+          "raw_corrected_csv": 63.99,
+          "baseline": 0.0,
+          "stabilization_time_s": 1.45,
+          "n": 195
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 84.0,
+          "raw_std_tail": 0.2857,
+          "raw_corrected_csv": 83.98,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 100.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 99.72,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 194
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.15,
+          "raw_corrected": 83.9485,
+          "raw_std_tail": 0.2211,
+          "raw_corrected_csv": 83.55,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 194
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.125,
+          "raw_corrected": 66.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 66.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.1,
+          "raw_corrected": 59.4082,
+          "raw_std_tail": 0.4915,
+          "raw_corrected_csv": 59.63,
+          "baseline": 0.0,
+          "stabilization_time_s": 2.01,
+          "n": 195
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.075,
+          "raw_corrected": 43.1122,
+          "raw_std_tail": 0.3157,
+          "raw_corrected_csv": 43.07,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.05,
+          "raw_corrected": 30.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 29.89,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.025,
+          "raw_corrected": 15.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 15.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        }
+      ]
+    },
+    {
+      "file": "docs/10. Célula 22X38/calibracao_memoria - média 1 - 22X38.csv",
+      "sha1": "8b0f93825525aacb0b8e49422b18681604ce78b4",
+      "cell": "22x38",
+      "row": 22,
+      "column": 38,
+      "block": 7,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 17.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 17.02,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 195
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 32.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 32.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 53.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 52.66,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 195
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 78.1633,
+          "raw_std_tail": 0.3696,
+          "raw_corrected_csv": 78.04,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.51,
+          "n": 196
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 85.9388,
+          "raw_std_tail": 0.2397,
+          "raw_corrected_csv": 85.79,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 195
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 108.9694,
+          "raw_std_tail": 0.1723,
+          "raw_corrected_csv": 108.66,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 117.0612,
+          "raw_std_tail": 0.2397,
+          "raw_corrected_csv": 116.54,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 127.2449,
+          "raw_std_tail": 0.7152,
+          "raw_corrected_csv": 127.14,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.225,
+          "raw_corrected": 132.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 132.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.2,
+          "raw_corrected": 128.9286,
+          "raw_std_tail": 0.2575,
+          "raw_corrected_csv": 128.75,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.175,
+          "raw_corrected": 120.8469,
+          "raw_std_tail": 0.36,
+          "raw_corrected_csv": 120.49,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.51,
+          "n": 196
+        },
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.15,
+          "raw_corrected": 114.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 113.97,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 196
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.125,
+          "raw_corrected": 97.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 97.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 196
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.1,
+          "raw_corrected": 78.1122,
+          "raw_std_tail": 0.3157,
+          "raw_corrected_csv": 78.06,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.075,
+          "raw_corrected": 60.9592,
+          "raw_std_tail": 0.1979,
+          "raw_corrected_csv": 60.71,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 196
+        },
+        {
+          "ponto_idx": 16,
+          "mass_kg": 0.05,
+          "raw_corrected": 51.9592,
+          "raw_std_tail": 0.1979,
+          "raw_corrected_csv": 51.98,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 17,
+          "mass_kg": 0.025,
+          "raw_corrected": 17.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 17.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 196
+        }
+      ]
+    },
+    {
+      "file": "docs/11. Célula 19X50/calibracao_memoria - média 1 - 19X50.csv",
+      "sha1": "6d6037e8771d8cf5c76636f0b68d7ede418086df",
+      "cell": "19x50",
+      "row": 19,
+      "column": 50,
+      "block": 8,
+      "points_up": [
+        {
+          "ponto_idx": 1,
+          "mass_kg": 0.025,
+          "raw_corrected": 16.9082,
+          "raw_std_tail": 0.2888,
+          "raw_corrected_csv": 16.69,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 2,
+          "mass_kg": 0.05,
+          "raw_corrected": 50.4286,
+          "raw_std_tail": 0.9476,
+          "raw_corrected_csv": 50.65,
+          "baseline": 0.0,
+          "stabilization_time_s": 4.4,
+          "n": 195
+        },
+        {
+          "ponto_idx": 3,
+          "mass_kg": 0.075,
+          "raw_corrected": 69.9694,
+          "raw_std_tail": 0.1723,
+          "raw_corrected_csv": 69.6,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 4,
+          "mass_kg": 0.1,
+          "raw_corrected": 84.9694,
+          "raw_std_tail": 0.1723,
+          "raw_corrected_csv": 84.91,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 5,
+          "mass_kg": 0.125,
+          "raw_corrected": 95.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 95.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 6,
+          "mass_kg": 0.15,
+          "raw_corrected": 94.9286,
+          "raw_std_tail": 0.2575,
+          "raw_corrected_csv": 95.69,
+          "baseline": 0.0,
+          "stabilization_time_s": 2.05,
+          "n": 196
+        },
+        {
+          "ponto_idx": 7,
+          "mass_kg": 0.175,
+          "raw_corrected": 106.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 106.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 8,
+          "mass_kg": 0.2,
+          "raw_corrected": 115.0,
+          "raw_std_tail": 0.0,
+          "raw_corrected_csv": 115.0,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        }
+      ],
+      "points_down_not_used": [
+        {
+          "ponto_idx": 9,
+          "mass_kg": 0.175,
+          "raw_corrected": 107.9694,
+          "raw_std_tail": 0.1723,
+          "raw_corrected_csv": 107.68,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        },
+        {
+          "ponto_idx": 10,
+          "mass_kg": 0.15,
+          "raw_corrected": 96.2347,
+          "raw_std_tail": 0.5111,
+          "raw_corrected_csv": 96.57,
+          "baseline": 0.0,
+          "stabilization_time_s": 3.41,
+          "n": 195
+        },
+        {
+          "ponto_idx": 11,
+          "mass_kg": 0.125,
+          "raw_corrected": 88.9694,
+          "raw_std_tail": 0.5616,
+          "raw_corrected_csv": 88.31,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 12,
+          "mass_kg": 0.1,
+          "raw_corrected": 76.5306,
+          "raw_std_tail": 0.4991,
+          "raw_corrected_csv": 75.95,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.52,
+          "n": 195
+        },
+        {
+          "ponto_idx": 13,
+          "mass_kg": 0.075,
+          "raw_corrected": 70.7347,
+          "raw_std_tail": 0.4415,
+          "raw_corrected_csv": 70.12,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.54,
+          "n": 195
+        },
+        {
+          "ponto_idx": 14,
+          "mass_kg": 0.05,
+          "raw_corrected": 46.4592,
+          "raw_std_tail": 1.5919,
+          "raw_corrected_csv": 47.11,
+          "baseline": 0.0,
+          "stabilization_time_s": 4.18,
+          "n": 195
+        },
+        {
+          "ponto_idx": 15,
+          "mass_kg": 0.025,
+          "raw_corrected": 24.1633,
+          "raw_std_tail": 0.3696,
+          "raw_corrected_csv": 24.01,
+          "baseline": 0.0,
+          "stabilization_time_s": 0.53,
+          "n": 195
+        }
+      ]
+    }
+  ],
+  "sector_layout": {
+    "cable_sector": 1,
+    "head_to_feet": [
+      {
+        "right": 1,
+        "left": 8
+      },
+      {
+        "right": 2,
+        "left": 7
+      },
+      {
+        "right": 3,
+        "left": 6
+      },
+      {
+        "right": 4,
+        "left": 5
+      }
+    ],
+    "matrix": {
+      "1": {
+        "rows": [
+          0,
+          15
+        ],
+        "cols": [
+          48,
+          63
+        ]
+      },
+      "2": {
+        "rows": [
+          0,
+          15
+        ],
+        "cols": [
+          32,
+          47
+        ]
+      },
+      "3": {
+        "rows": [
+          0,
+          15
+        ],
+        "cols": [
+          16,
+          31
+        ]
+      },
+      "4": {
+        "rows": [
+          0,
+          15
+        ],
+        "cols": [
+          0,
+          15
+        ]
+      },
+      "5": {
+        "rows": [
+          16,
+          31
+        ],
+        "cols": [
+          0,
+          15
+        ]
+      },
+      "6": {
+        "rows": [
+          16,
+          31
+        ],
+        "cols": [
+          16,
+          31
+        ]
+      },
+      "7": {
+        "rows": [
+          16,
+          31
+        ],
+        "cols": [
+          32,
+          47
+        ]
+      },
+      "8": {
+        "rows": [
+          16,
+          31
+        ],
+        "cols": [
+          48,
+          63
+        ]
+      }
+    }
+  },
+  "blocks": {
+    "1": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          26.3505,
+          41.732,
+          61.0,
+          73.6804,
+          82.9794,
+          96.1959,
+          106.0,
+          113.0,
+          117.0
+        ],
+        "mass_kg": [
+          0.0,
+          0.018,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175,
+          0.2
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 117.0,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.2,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "9x53"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.018,
+          "raw_mean": 26.3505,
+          "raw_isotonic": 26.3505
+        },
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 41.732,
+          "raw_isotonic": 41.732
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 61.0,
+          "raw_isotonic": 61.0
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 73.6804,
+          "raw_isotonic": 73.6804
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 82.9794,
+          "raw_isotonic": 82.9794
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 96.1959,
+          "raw_isotonic": 96.1959
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 106.0,
+          "raw_isotonic": 106.0
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 113.0,
+          "raw_isotonic": 113.0
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 117.0,
+          "raw_isotonic": 117.0
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 26.351,
+          "g_per_raw": 0.68
+        },
+        {
+          "raw_from": 26.351,
+          "raw_to": 41.732,
+          "g_per_raw": 0.46
+        },
+        {
+          "raw_from": 41.732,
+          "raw_to": 61.0,
+          "g_per_raw": 1.3
+        },
+        {
+          "raw_from": 61.0,
+          "raw_to": 73.68,
+          "g_per_raw": 1.97
+        },
+        {
+          "raw_from": 73.68,
+          "raw_to": 82.979,
+          "g_per_raw": 2.69
+        },
+        {
+          "raw_from": 82.979,
+          "raw_to": 96.196,
+          "g_per_raw": 1.89
+        },
+        {
+          "raw_from": 96.196,
+          "raw_to": 106.0,
+          "g_per_raw": 2.55
+        },
+        {
+          "raw_from": 106.0,
+          "raw_to": 113.0,
+          "g_per_raw": 3.57
+        },
+        {
+          "raw_from": 113.0,
+          "raw_to": 117.0,
+          "g_per_raw": 6.25
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 9.1,
+        "up_curve_on_down_rmse_g": 13.7,
+        "up_curve_on_down_bias_g": 11.6
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            41.0309,
+            50.0,
+            70.0,
+            83.0619,
+            90.0,
+            102.8557,
+            108.0,
+            113.0
+          ],
+          "mass_kg": [
+            0.0,
+            0.018,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.175
+          ]
+        }
+      }
+    },
+    "2": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          6.0202,
+          26.6523,
+          55.8862,
+          72.3089,
+          80.4584,
+          83.8656,
+          88.2368,
+          91.711,
+          93.1079,
+          94.3605
+        ],
+        "mass_kg": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.1375,
+          0.175,
+          0.2,
+          0.225,
+          0.25,
+          0.275
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 94.3605,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.275,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "12x34",
+        "12x37"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 6.0202,
+          "raw_isotonic": 6.0202
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 26.6523,
+          "raw_isotonic": 26.6523
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 55.8863,
+          "raw_isotonic": 55.8863
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 72.3089,
+          "raw_isotonic": 72.3089
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 80.5976,
+          "raw_isotonic": 80.4584
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 80.3192,
+          "raw_isotonic": 80.4584
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 83.8656,
+          "raw_isotonic": 83.8656
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 88.2368,
+          "raw_isotonic": 88.2368
+        },
+        {
+          "mass_kg": 0.225,
+          "raw_mean": 91.711,
+          "raw_isotonic": 91.711
+        },
+        {
+          "mass_kg": 0.25,
+          "raw_mean": 93.1079,
+          "raw_isotonic": 93.1079
+        },
+        {
+          "mass_kg": 0.275,
+          "raw_mean": 94.3605,
+          "raw_isotonic": 94.3605
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 6.02,
+          "g_per_raw": 4.15
+        },
+        {
+          "raw_from": 6.02,
+          "raw_to": 26.652,
+          "g_per_raw": 1.21
+        },
+        {
+          "raw_from": 26.652,
+          "raw_to": 55.886,
+          "g_per_raw": 0.86
+        },
+        {
+          "raw_from": 55.886,
+          "raw_to": 72.309,
+          "g_per_raw": 1.52
+        },
+        {
+          "raw_from": 72.309,
+          "raw_to": 80.458,
+          "g_per_raw": 4.6
+        },
+        {
+          "raw_from": 80.458,
+          "raw_to": 83.866,
+          "g_per_raw": 11.01
+        },
+        {
+          "raw_from": 83.866,
+          "raw_to": 88.237,
+          "g_per_raw": 5.72
+        },
+        {
+          "raw_from": 88.237,
+          "raw_to": 91.711,
+          "g_per_raw": 7.2
+        },
+        {
+          "raw_from": 91.711,
+          "raw_to": 93.108,
+          "g_per_raw": 17.9
+        },
+        {
+          "raw_from": 93.108,
+          "raw_to": 94.36,
+          "g_per_raw": 19.96
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 14.8,
+        "up_curve_on_down_rmse_g": 16.0,
+        "up_curve_on_down_bias_g": 6.4
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            33.5785,
+            34.3992,
+            70.6234,
+            76.6491,
+            80.7058,
+            82.2522,
+            84.8716,
+            85.3605,
+            90.8863,
+            92.314
+          ],
+          "mass_kg": [
+            0.0,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.175,
+            0.2,
+            0.225,
+            0.25
+          ]
+        }
+      }
+    },
+    "3": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          12.0405,
+          44.3046,
+          49.69,
+          57.6488,
+          63.721,
+          63.9477,
+          68.69,
+          72.69,
+          73.4426,
+          74.69
+        ],
+        "mass_kg": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.1375,
+          0.175,
+          0.2,
+          0.225,
+          0.25,
+          0.275
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 74.69,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.275,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "13x26"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 12.0405,
+          "raw_isotonic": 12.0405
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 44.3046,
+          "raw_isotonic": 44.3046
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 49.69,
+          "raw_isotonic": 49.69
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 57.6488,
+          "raw_isotonic": 57.6488
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 65.9787,
+          "raw_isotonic": 63.721
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 61.4632,
+          "raw_isotonic": 63.721
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 63.9477,
+          "raw_isotonic": 63.9477
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 68.69,
+          "raw_isotonic": 68.69
+        },
+        {
+          "mass_kg": 0.225,
+          "raw_mean": 72.69,
+          "raw_isotonic": 72.69
+        },
+        {
+          "mass_kg": 0.25,
+          "raw_mean": 73.4426,
+          "raw_isotonic": 73.4426
+        },
+        {
+          "mass_kg": 0.275,
+          "raw_mean": 74.69,
+          "raw_isotonic": 74.69
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 12.04,
+          "g_per_raw": 2.08
+        },
+        {
+          "raw_from": 12.04,
+          "raw_to": 44.305,
+          "g_per_raw": 0.77
+        },
+        {
+          "raw_from": 44.305,
+          "raw_to": 49.69,
+          "g_per_raw": 4.64
+        },
+        {
+          "raw_from": 49.69,
+          "raw_to": 57.649,
+          "g_per_raw": 3.14
+        },
+        {
+          "raw_from": 57.649,
+          "raw_to": 63.721,
+          "g_per_raw": 6.18
+        },
+        {
+          "raw_from": 63.721,
+          "raw_to": 63.948,
+          "g_per_raw": 165.38
+        },
+        {
+          "raw_from": 63.948,
+          "raw_to": 68.69,
+          "g_per_raw": 5.27
+        },
+        {
+          "raw_from": 68.69,
+          "raw_to": 72.69,
+          "g_per_raw": 6.25
+        },
+        {
+          "raw_from": 72.69,
+          "raw_to": 73.443,
+          "g_per_raw": 33.22
+        },
+        {
+          "raw_from": 73.443,
+          "raw_to": 74.69,
+          "g_per_raw": 20.04
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 26.4,
+        "up_curve_on_down_rmse_g": 15.6,
+        "up_curve_on_down_bias_g": 11.8
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            36.7716,
+            47.2108,
+            56.69,
+            61.2982,
+            63.2673,
+            64.3601,
+            66.8463,
+            69.69,
+            71.9065,
+            73.6281
+          ],
+          "mass_kg": [
+            0.0,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.175,
+            0.2,
+            0.225,
+            0.25
+          ]
+        }
+      }
+    },
+    "4": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          30.5876,
+          51.0309,
+          60.0,
+          68.0,
+          76.0,
+          84.3402,
+          92.0
+        ],
+        "mass_kg": [
+          0.0,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175,
+          0.2
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 92.0,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.2,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "13x14"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 0.0,
+          "raw_isotonic": 0.0
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 30.5876,
+          "raw_isotonic": 30.5876
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 51.0309,
+          "raw_isotonic": 51.0309
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 60.0,
+          "raw_isotonic": 60.0
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 68.0,
+          "raw_isotonic": 68.0
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 76.0,
+          "raw_isotonic": 76.0
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 84.3402,
+          "raw_isotonic": 84.3402
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 92.0,
+          "raw_isotonic": 92.0
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 30.588,
+          "g_per_raw": 1.63
+        },
+        {
+          "raw_from": 30.588,
+          "raw_to": 51.031,
+          "g_per_raw": 1.22
+        },
+        {
+          "raw_from": 51.031,
+          "raw_to": 60.0,
+          "g_per_raw": 2.79
+        },
+        {
+          "raw_from": 60.0,
+          "raw_to": 68.0,
+          "g_per_raw": 3.12
+        },
+        {
+          "raw_from": 68.0,
+          "raw_to": 76.0,
+          "g_per_raw": 3.12
+        },
+        {
+          "raw_from": 76.0,
+          "raw_to": 84.34,
+          "g_per_raw": 3.0
+        },
+        {
+          "raw_from": 84.34,
+          "raw_to": 92.0,
+          "g_per_raw": 3.26
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 13.8,
+        "up_curve_on_down_rmse_g": 14.2,
+        "up_curve_on_down_bias_g": 4.7
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            30.1546,
+            54.0,
+            63.0,
+            74.0,
+            81.0,
+            87.0
+          ],
+          "mass_kg": [
+            0.0,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.175
+          ]
+        }
+      }
+    },
+    "5": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          12.9588,
+          29.0,
+          37.8041,
+          48.7423,
+          61.9588,
+          75.134,
+          92.9175,
+          103.0,
+          118.9588
+        ],
+        "mass_kg": [
+          0.0,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175,
+          0.2,
+          0.225,
+          0.25
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 118.9588,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.25,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "26x11"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 0.0,
+          "raw_isotonic": 0.0
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 12.9588,
+          "raw_isotonic": 12.9588
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 29.0,
+          "raw_isotonic": 29.0
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 37.8041,
+          "raw_isotonic": 37.8041
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 48.7423,
+          "raw_isotonic": 48.7423
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 61.9588,
+          "raw_isotonic": 61.9588
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 75.134,
+          "raw_isotonic": 75.134
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 92.9175,
+          "raw_isotonic": 92.9175
+        },
+        {
+          "mass_kg": 0.225,
+          "raw_mean": 103.0,
+          "raw_isotonic": 103.0
+        },
+        {
+          "mass_kg": 0.25,
+          "raw_mean": 118.9588,
+          "raw_isotonic": 118.9588
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 12.959,
+          "g_per_raw": 3.86
+        },
+        {
+          "raw_from": 12.959,
+          "raw_to": 29.0,
+          "g_per_raw": 1.56
+        },
+        {
+          "raw_from": 29.0,
+          "raw_to": 37.804,
+          "g_per_raw": 2.84
+        },
+        {
+          "raw_from": 37.804,
+          "raw_to": 48.742,
+          "g_per_raw": 2.29
+        },
+        {
+          "raw_from": 48.742,
+          "raw_to": 61.959,
+          "g_per_raw": 1.89
+        },
+        {
+          "raw_from": 61.959,
+          "raw_to": 75.134,
+          "g_per_raw": 1.9
+        },
+        {
+          "raw_from": 75.134,
+          "raw_to": 92.918,
+          "g_per_raw": 1.41
+        },
+        {
+          "raw_from": 92.918,
+          "raw_to": 103.0,
+          "g_per_raw": 2.48
+        },
+        {
+          "raw_from": 103.0,
+          "raw_to": 118.959,
+          "g_per_raw": 1.57
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 13.3,
+        "up_curve_on_down_rmse_g": 34.6,
+        "up_curve_on_down_bias_g": 32.2
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            10.0,
+            21.7732,
+            45.4433,
+            55.2371,
+            71.0,
+            81.0,
+            104.0,
+            117.9278
+          ],
+          "mass_kg": [
+            0.0,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.1875,
+            0.225
+          ]
+        }
+      }
+    },
+    "6": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          4.2245,
+          28.5612,
+          37.0,
+          50.0,
+          64.7143,
+          84.0,
+          100.0
+        ],
+        "mass_kg": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 100.0,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.175,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "19x20"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 4.2245,
+          "raw_isotonic": 4.2245
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 28.5612,
+          "raw_isotonic": 28.5612
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 37.0,
+          "raw_isotonic": 37.0
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 50.0,
+          "raw_isotonic": 50.0
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 64.7143,
+          "raw_isotonic": 64.7143
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 84.0,
+          "raw_isotonic": 84.0
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 100.0,
+          "raw_isotonic": 100.0
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 4.224,
+          "g_per_raw": 5.92
+        },
+        {
+          "raw_from": 4.224,
+          "raw_to": 28.561,
+          "g_per_raw": 1.03
+        },
+        {
+          "raw_from": 28.561,
+          "raw_to": 37.0,
+          "g_per_raw": 2.96
+        },
+        {
+          "raw_from": 37.0,
+          "raw_to": 50.0,
+          "g_per_raw": 1.92
+        },
+        {
+          "raw_from": 50.0,
+          "raw_to": 64.714,
+          "g_per_raw": 1.7
+        },
+        {
+          "raw_from": 64.714,
+          "raw_to": 84.0,
+          "g_per_raw": 1.3
+        },
+        {
+          "raw_from": 84.0,
+          "raw_to": 100.0,
+          "g_per_raw": 1.56
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 13.7,
+        "up_curve_on_down_rmse_g": 10.1,
+        "up_curve_on_down_bias_g": 7.9
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            15.0,
+            30.0,
+            43.1122,
+            59.4082,
+            66.0,
+            83.9485
+          ],
+          "mass_kg": [
+            0.0,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15
+          ]
+        }
+      }
+    },
+    "7": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          17.0,
+          32.0,
+          53.0,
+          78.1633,
+          85.9388,
+          108.9694,
+          117.0612,
+          127.2449,
+          132.0
+        ],
+        "mass_kg": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175,
+          0.2,
+          0.225
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 132.0,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.225,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "22x38"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 17.0,
+          "raw_isotonic": 17.0
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 32.0,
+          "raw_isotonic": 32.0
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 53.0,
+          "raw_isotonic": 53.0
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 78.1633,
+          "raw_isotonic": 78.1633
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 85.9388,
+          "raw_isotonic": 85.9388
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 108.9694,
+          "raw_isotonic": 108.9694
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 117.0612,
+          "raw_isotonic": 117.0612
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 127.2449,
+          "raw_isotonic": 127.2449
+        },
+        {
+          "mass_kg": 0.225,
+          "raw_mean": 132.0,
+          "raw_isotonic": 132.0
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 17.0,
+          "g_per_raw": 1.47
+        },
+        {
+          "raw_from": 17.0,
+          "raw_to": 32.0,
+          "g_per_raw": 1.67
+        },
+        {
+          "raw_from": 32.0,
+          "raw_to": 53.0,
+          "g_per_raw": 1.19
+        },
+        {
+          "raw_from": 53.0,
+          "raw_to": 78.163,
+          "g_per_raw": 0.99
+        },
+        {
+          "raw_from": 78.163,
+          "raw_to": 85.939,
+          "g_per_raw": 3.22
+        },
+        {
+          "raw_from": 85.939,
+          "raw_to": 108.969,
+          "g_per_raw": 1.09
+        },
+        {
+          "raw_from": 108.969,
+          "raw_to": 117.061,
+          "g_per_raw": 3.09
+        },
+        {
+          "raw_from": 117.061,
+          "raw_to": 127.245,
+          "g_per_raw": 2.45
+        },
+        {
+          "raw_from": 127.245,
+          "raw_to": 132.0,
+          "g_per_raw": 5.26
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 12.3,
+        "up_curve_on_down_rmse_g": 11.9,
+        "up_curve_on_down_bias_g": 9.3
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            17.0,
+            51.9592,
+            60.9592,
+            78.1122,
+            97.0,
+            114.0,
+            120.8469,
+            128.9286
+          ],
+          "mass_kg": [
+            0.0,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.175,
+            0.2
+          ]
+        }
+      }
+    },
+    "8": {
+      "kind": "pchip",
+      "params": {
+        "raw": [
+          0.0,
+          16.9082,
+          50.4286,
+          69.9694,
+          84.9694,
+          94.9643,
+          106.0,
+          115.0
+        ],
+        "mass_kg": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.1375,
+          0.175,
+          0.2
+        ]
+      },
+      "raw_min_valid": 1.0,
+      "raw_max_valid": 115.0,
+      "mass_min_valid": 0.0,
+      "mass_max_valid": 0.2,
+      "low_sensitivity_raw": null,
+      "source": "cells",
+      "cells": [
+        "19x50"
+      ],
+      "fit": [
+        {
+          "mass_kg": 0.025,
+          "raw_mean": 16.9082,
+          "raw_isotonic": 16.9082
+        },
+        {
+          "mass_kg": 0.05,
+          "raw_mean": 50.4286,
+          "raw_isotonic": 50.4286
+        },
+        {
+          "mass_kg": 0.075,
+          "raw_mean": 69.9694,
+          "raw_isotonic": 69.9694
+        },
+        {
+          "mass_kg": 0.1,
+          "raw_mean": 84.9694,
+          "raw_isotonic": 84.9694
+        },
+        {
+          "mass_kg": 0.125,
+          "raw_mean": 95.0,
+          "raw_isotonic": 94.9643
+        },
+        {
+          "mass_kg": 0.15,
+          "raw_mean": 94.9286,
+          "raw_isotonic": 94.9643
+        },
+        {
+          "mass_kg": 0.175,
+          "raw_mean": 106.0,
+          "raw_isotonic": 106.0
+        },
+        {
+          "mass_kg": 0.2,
+          "raw_mean": 115.0,
+          "raw_isotonic": 115.0
+        }
+      ],
+      "sensitivity_g_per_raw": [
+        {
+          "raw_from": 0.0,
+          "raw_to": 16.908,
+          "g_per_raw": 1.48
+        },
+        {
+          "raw_from": 16.908,
+          "raw_to": 50.429,
+          "g_per_raw": 0.75
+        },
+        {
+          "raw_from": 50.429,
+          "raw_to": 69.969,
+          "g_per_raw": 1.28
+        },
+        {
+          "raw_from": 69.969,
+          "raw_to": 84.969,
+          "g_per_raw": 1.67
+        },
+        {
+          "raw_from": 84.969,
+          "raw_to": 94.964,
+          "g_per_raw": 3.75
+        },
+        {
+          "raw_from": 94.964,
+          "raw_to": 106.0,
+          "g_per_raw": 3.4
+        },
+        {
+          "raw_from": 106.0,
+          "raw_to": 115.0,
+          "g_per_raw": 2.78
+        }
+      ],
+      "validation": {
+        "loo_rmse_g": 16.3,
+        "up_curve_on_down_rmse_g": 8.8,
+        "up_curve_on_down_bias_g": -3.6
+      },
+      "down_curve_not_used": {
+        "kind": "pchip",
+        "params": {
+          "raw": [
+            0.0,
+            24.1633,
+            46.4592,
+            70.7347,
+            76.5306,
+            88.9694,
+            96.2347,
+            107.9694
+          ],
+          "mass_kg": [
+            0.0,
+            0.025,
+            0.05,
+            0.075,
+            0.1,
+            0.125,
+            0.15,
+            0.175
+          ]
+        }
+      }
+    }
+  },
+  "aggregation": {
+    "method": "sector_gain_sum",
+    "gains": {
+      "1": 2.11209,
+      "2": 2.11209,
+      "3": 2.11209,
+      "4": 2.11209,
+      "5": 2.11209,
+      "6": 2.11209,
+      "7": 2.11209,
+      "8": 2.11209
+    },
+    "calibrated": true,
+    "fit": {
+      "source": "painel /calibracao",
+      "mode": "global",
+      "lambda": null,
+      "point_ids": [
+        "70e00349bdcf",
+        "e709cd0ea537",
+        "f29cd32de280",
+        "a37ee8daaf5b",
+        "7ac4e0d48de3",
+        "9bfa91da034f"
+      ],
+      "points": 6,
+      "without_gain": {
+        "rmse_kg": 28.191,
+        "bias_kg": -21.058,
+        "mape_pct": 59.9
+      },
+      "fitted": {
+        "rmse_kg": 2.063,
+        "bias_kg": -0.422,
+        "mape_pct": 17.0
+      },
+      "leave_one_out": {
+        "rmse_kg": 3.154,
+        "bias_kg": -0.52,
+        "mape_pct": 17.8
+      },
+      "fitted_at": "2026-10-15T18:47:04.952161+00:00",
+      "curves_sha1": "1d83610e7d40a1a983d54e6bfd1eddc2a1764801",
+      "calibration_version": "MC-2026-002-PROV"
+    }
+  }
+}

@@ -76,7 +76,7 @@ def test_acquisition_worker_lifecycle_and_broadcast() -> None:
 
         # Testa disparo de tara
         worker.trigger_tare()
-        assert worker._tare_pending is True
+        assert worker.tare_status()["collecting"] is True
 
     finally:
         worker.stop()

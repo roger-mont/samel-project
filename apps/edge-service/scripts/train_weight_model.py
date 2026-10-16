@@ -40,6 +40,9 @@ def carregar_dataset(sessions_dir: Path) -> pd.DataFrame:
 
     df = pd.concat(dfs, ignore_index=True)
     df = df[df["peso_real_kg"] > 0].copy()
+    # Só frames marcados como estáveis (a partir da v3 a flag é calculada por frame)
+    if "estavel" in df.columns:
+        df = df[df["estavel"].fillna(1).astype(int) == 1].copy()
     return df
 
 
@@ -47,17 +50,26 @@ def particionar_datasets_metrologicos(
     df: pd.DataFrame,
     seed: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Divide o dataset em Dcal (60%), Dval (20%) e Dblind (20%) conforme diretrizes."""
+    """Divide o dataset em Dcal (60%), Dval (20%) e Dblind (20%) das SESSÕES.
+
+    Frames da mesma sessão são quase idênticos; sorteá-los um a um colocaria a mesma
+    sessão no treino e no conjunto cego e deixaria o erro artificialmente baixo.
+    """
     rng = np.random.default_rng(seed)
-    indices = rng.permutation(len(df))
-    n_cal = int(0.60 * len(df))
-    n_val = int(0.20 * len(df))
+    sessoes = df["session_id"].unique()
+    sessoes = sessoes[rng.permutation(len(sessoes))]
+    n_cal = int(0.60 * len(sessoes))
+    n_val = int(0.20 * len(sessoes))
 
-    cal_idx = indices[:n_cal]
-    val_idx = indices[n_cal : n_cal + n_val]
-    blind_idx = indices[n_cal + n_val :]
+    cal_s = set(sessoes[:n_cal])
+    val_s = set(sessoes[n_cal : n_cal + n_val])
+    blind_s = set(sessoes[n_cal + n_val :])
 
-    return df.iloc[cal_idx].copy(), df.iloc[val_idx].copy(), df.iloc[blind_idx].copy()
+    return (
+        df[df["session_id"].isin(cal_s)].copy(),
+        df[df["session_id"].isin(val_s)].copy(),
+        df[df["session_id"].isin(blind_s)].copy(),
+    )
 
 
 def extrair_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:

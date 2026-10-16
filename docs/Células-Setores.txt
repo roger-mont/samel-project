@@ -1,0 +1,8 @@
+Setor 1: 9X53
+Setor 2: 12X34 ou 12X37
+Setor 3: 13X26
+Setor 4: 13X14
+Setor 5: 26X11
+Setor 6: 19X20
+Setor 7: 22X38
+Setor 8: 19X50

@@ -21,6 +21,14 @@ apps/edge-service/data/*.db-wal
 apps/edge-service/data/*.db-shm
 apps/edge-service/data/*.db-journal
 
+# RAW completo dos experimentos (cerca de 5 MB por minuto) e baseline local da maca
+apps/edge-service/data/experiments/
+apps/edge-service/data/gain_points.json
+apps/edge-service/data/*.tmp
+apps/edge-service/data/sessions/raw/
+apps/edge-service/src/storage/baseline_raw.json
+apps/edge-service/src/storage/*.tmp
+
 # Backups e artefatos de calibração
 .calib_backup
 calib_backup/

@@ -108,7 +108,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_service.ps1
 
 ---
 
-### 4. Execução dos Testes Automatizados
+### 4. Calibração, tara e experimentos
+
+- **Peso só quando válido:** `GET /api/v1/telemetry/live` devolve `weight_kg` preenchido apenas com `weight_status = VALID`. Os outros estados são `NO_LOAD`, `LOAD_DETECTED`, `STABILIZING`, `MOVEMENT` e `NOT_VALIDATED`. As flags ficam em `measurement_quality`, e o último peso válido vem em `last_valid`.
+- **Tara (baseline por célula):** `POST /api/v1/calibration/tare` com a maca vazia. Ela dura `t_tare_s` segundos (padrão 5). A tara em vigor aparece em `GET /api/v1/calibration/tare`.
+- **Parâmetros de estabilidade:** `GET/POST /api/v1/calibration/params`. Com `"persist": true`, o valor é gravado em `config.json`, no bloco `acquisition`.
+- **Curva de calibração (RAW → massa local):** só valem as calibrações de célula de `docs/<n>. Célula AxB/` (A = linha da matriz, 0-31; B = coluna, 0-63; origem no setor 4). Cada setor ganha a curva da(s) sua(s) célula(s): isotônica + PCHIP, ramo de subida. Para regerar `src/storage/block_curves.json`:
+  ```bash
+  python apps/edge-service/scripts/gerar_curvas_bloco.py
+  ```
+- **Massa local → massa total:** `M = Σ_s α_s · Σ_{ij∈s} f_s(x_ij)`. Os ganhos α_s ficam em 1 até serem ajustados com cargas de peso conhecido. Regerar as curvas volta os ganhos para 1.
+  - **Pela tela (recomendado):** card "Ajuste de ganho α" de `/calibracao`. Faça a tara, registre pontos (peso real + carga estável), calcule e aplique. Os pontos ficam em `data/gain_points.json` e o α é gravado em `block_curves.json` só ao clicar em "Aplicar ganhos".
+  - **Por experimentos gravados:** com `known_mass_g` marcado em `/experiments/mark`; o script só grava com `--gravar`:
+    ```bash
+    python apps/edge-service/scripts/ajustar_ganho_massa_total.py apps/edge-service/data/experiments/<sessão> [--modo setor] [--gravar]
+    ```
+- **Comparação de modelos (curvas e ML):** `python apps/edge-service/scripts/comparar_modelos_massa.py`.
+- **Tela de calibração ao vivo:** `http://localhost:8000/calibracao`. Mostra as 8 curvas juntas, cada setor com seus pontos, as curvas dos modelos candidatos (curvas e ML, ajuste por setor ou global) e a massa da leitura atual por todos os modelos. Para testar com carga conhecida, informe o peso real e use "Registrar leitura"; o resumo dá o erro de cada modelo e baixa um CSV. Atalhos: `?view=all|sector|models&setor=1..8&modo=sector|global`. A primeira leitura da comparação treina os modelos (alguns segundos).
+- **Experimentos (RAW completo):** use `POST /api/v1/experiments/start`, depois `/mark` (ciclo, `known_mass_g`, `loading_direction`) e por fim `/stop`. Os dados ficam em `apps/edge-service/data/experiments/` e não vão para o git.
+
+### 5. Execução dos Testes Automatizados
 ```bash
 pytest tests/edge/ -v
 ```

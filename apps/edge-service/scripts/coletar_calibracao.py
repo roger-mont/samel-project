@@ -1,7 +1,11 @@
 """Assistente Interativo de Coleta de Sessões de Calibração para a Maca Samel.
 
-Lê a manta sensora USB HID, amostra durante repouso da carga,
-permite calibração de TARA (peso 0) e anexa medições a data/sessions/calib_wide_YYYYMMDD.csv.
+Lê a manta sensora USB HID, amostra durante repouso da carga, registra a TARA
+(peso 0) e anexa medições a data/sessions/calib_wide_YYYYMMDD_v3.csv.
+
+Cada frame recebe o próprio timestamp e a flag de estabilidade calculada pela
+mesma máquina de estados do edge-service. O RAW completo de cada sessão vai para
+data/sessions/raw/<session_id>.u8 (uint8, 2.048 bytes por frame, mesma ordem do CSV).
 """
 from __future__ import annotations
 
@@ -18,8 +22,9 @@ import numpy as np
 edge_src = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(edge_src))
 
-from storage.calibration_store import BLOCK_REGIONS, load_calibration, GRAVITY_M_S2
-from storage.tare_store import save_tare, load_tare
+from core.settings import CalibrationParams
+from math_engine.reading_state import ReadingState, ReadingStateMachine
+from storage.calibration_store import BLOCK_REGIONS
 
 try:
     import hid
@@ -33,6 +38,7 @@ HID_PACKET_SIZE = 64
 HID_ROWS = 32
 HID_COLS = 64
 SAMPLE_INTERVAL = 0.025  # ~40 Hz
+SOFTWARE_VERSION = "3.0.0"
 
 
 def parse_hid_packet(data: bytes, matrix: np.ndarray) -> None:
@@ -76,12 +82,16 @@ def coletar_amostra(
     dev: hid.device,
     duracao_s: float = 15.0,
     is_tare: bool = False,
+    baseline: np.ndarray | None = None,
 ) -> tuple[list[dict], np.ndarray, float]:
-    """Amostra leituras contínuas por 'duracao_s' segundos.
-    
-    Descarta os primeiros 2.0s (acomodação) e retorna lista de frames capturados.
+    """Amostra leituras contínuas por 'duracao_s' segundos, sem descartar frames.
+
+    O transitório fica registrado e marcado como instável pela máquina de estados,
+    em vez de ser cortado por um tempo fixo.
     """
     matrix = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
+    base = baseline if baseline is not None else np.zeros((HID_ROWS, HID_COLS))
+    machine = ReadingStateMachine(CalibrationParams())
     deadline = time.monotonic() + duracao_s
     t_start = time.monotonic()
 
@@ -90,7 +100,6 @@ def coletar_amostra(
         pass
 
     frames_registrados: list[dict] = []
-    tempo_descarte_inicial_s = 1.5 if not is_tare else 0.5
 
     label = "TARA (maca vazia)" if is_tare else "CARGA"
     print(f"\n[+] Coletando {label} por {duracao_s:.0f}s...")
@@ -104,25 +113,37 @@ def coletar_amostra(
             parse_hid_packet(bytes(raw), matrix)
 
         elapsed = time.monotonic() - t_start
+        corrected = np.maximum(0.0, matrix - base)
+        state = machine.update(corrected, elapsed)
+        metrics = machine.metrics
         soma_total = float(matrix.sum())
 
-        b_instantaneo = [float(matrix[BLOCK_REGIONS[bid]].sum()) for bid in range(1, 9)]
-
-        if elapsed >= tempo_descarte_inicial_s and (is_tare or soma_total > 50.0):
-            frames_registrados.append({
-                "tempo_s": round(elapsed, 3),
-                "b_vals": b_instantaneo,
-                "soma_total": soma_total,
-            })
+        frames_registrados.append({
+            "timestamp_iso": datetime.now(timezone.utc).astimezone().isoformat(),
+            "tempo_s": round(elapsed, 3),
+            "b_vals": [float(matrix[BLOCK_REGIONS[bid]].sum()) for bid in range(1, 9)],
+            "soma_total": soma_total,
+            "soma_corrigida": float(corrected.sum()),
+            "estado": state.value,
+            "estavel": 1 if state in (ReadingState.ESTAVEL, ReadingState.MEDICAO_VALIDA) else 0,
+            "stabilization_time_s": metrics.stabilization_time_s,
+            "raw": np.clip(np.rint(matrix), 0, 255).astype(np.uint8),
+        })
 
         rem = max(0.0, duracao_s - elapsed)
-        print(f"\r  [Tempo restante: {rem:4.1f}s | Frames válidos: {len(frames_registrados):3d} | Soma: {soma_total:6.0f}] ", end="", flush=True)
+        print(
+            f"\r  [Tempo restante: {rem:4.1f}s | Frames: {len(frames_registrados):4d} | "
+            f"Soma: {soma_total:7.0f} | {state.value:<15}] ",
+            end="",
+            flush=True,
+        )
 
         dt = SAMPLE_INTERVAL - (time.monotonic() - t0)
         if dt > 0:
             time.sleep(dt)
 
-    print(f"\n[✓] Amostragem concluída! ({len(frames_registrados)} frames)")
+    estaveis = sum(f["estavel"] for f in frames_registrados)
+    print(f"\n[✓] Amostragem concluída! ({len(frames_registrados)} frames, {estaveis} estáveis)")
 
     if not frames_registrados:
         return [], np.zeros(8), 0.0
@@ -133,35 +154,24 @@ def coletar_amostra(
     return frames_registrados, b_medias, soma_media
 
 
-def executar_tara(dev: hid.device, sessions_dir: Path, duracao_s: float = 5.0) -> None:
-    """Executa a calibração de TARA (peso 0 kg) e atualiza o tare.json."""
+def executar_tara(dev: hid.device, sessions_dir: Path, duracao_s: float = 5.0) -> np.ndarray | None:
+    """Registra a TARA (peso 0 kg) e devolve o baseline por célula (média dos frames)."""
     input("\n-> Certifique-se de que a maca está VAZIA (sem nenhum peso) e pressione ENTER...")
-    frames_registrados, b_medias, soma_media = coletar_amostra(dev, duracao_s=duracao_s, is_tare=True)
+    frames_registrados, _, soma_media = coletar_amostra(dev, duracao_s=duracao_s, is_tare=True)
 
     if not frames_registrados:
         print("[!] Nenhum frame capturado durante a tara. Tente novamente.")
-        return
+        return None
 
-    # Estima massa base da manta vazia para tara
-    storage_dir = Path(__file__).resolve().parent.parent / "src" / "storage"
-    calib_path = storage_dir / "calibration.json"
-    tare_path = storage_dir / "tare.json"
+    stack = np.stack([f["raw"].astype(np.float64) for f in frames_registrados])
+    baseline = stack.mean(axis=0)
+    desvio_medio = float(stack.std(axis=0).mean())
 
-    calib = load_calibration(calib_path)
-    mat_vazia = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
-    # preenche com médias por bloco
-    for bid, (r_sl, c_sl) in BLOCK_REGIONS.items():
-        mat_vazia[r_sl, c_sl] = b_medias[bid - 1] / (16 * 16)
+    salvar_sessao(sessions_dir, 0.0, "tare", 1, frames_registrados, duracao_s, baseline_raw=float(baseline.sum()))
 
-    massa_vazia_kg = calib.predict_mass(mat_vazia) if calib.is_valid else (soma_media / (GRAVITY_M_S2 * 100.0))
-    save_tare(massa_vazia_kg, tare_path)
-
-    # Registra no dataset como peso 0.0
-    salvar_sessao(sessions_dir, 0.0, "tare", 1, frames_registrados, duracao_s)
-
-    print(f"[✓] TARA configurada com sucesso!")
-    print(f"    Soma média de repouso: {soma_media:.1f}")
-    print(f"    Offset de tara salvo: {massa_vazia_kg:.4f} kg (em {tare_path.name})")
+    print("[✓] TARA registrada.")
+    print(f"    Soma média de repouso: {soma_media:.1f} | desvio médio por célula: {desvio_medio:.2f} RAW")
+    return baseline
 
 
 def salvar_sessao(
@@ -177,10 +187,12 @@ def salvar_sessao(
     block_id: int = 0,
     cell_id: str = "all",
 ) -> tuple[Path, int]:
-    """Salva frames da sessão no formato calib_wide_YYYYMMDD.csv com metadados de histerese."""
+    """Salva frames da sessão em calib_wide_YYYYMMDD_v3.csv e o RAW em raw/<session_id>.u8."""
     sessions_dir.mkdir(parents=True, exist_ok=True)
     hoje_str = datetime.now(timezone.utc).strftime("%Y%m%d")
-    csv_path = sessions_dir / f"calib_wide_{hoje_str}.csv"
+    csv_path = sessions_dir / f"calib_wide_{hoje_str}_v3.csv"
+    raw_dir = sessions_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
 
     headers = [
         "timestamp_iso",
@@ -207,47 +219,62 @@ def salvar_sessao(
         "B7",
         "B8",
         "soma_total",
+        "soma_corrigida",
         "tempo_s",
+        "estado",
         "estavel",
-        "modelo_estimado",
+        "raw_file",
+        "raw_frame_idx",
+        "duracao_s",
     ]
 
     novo = not csv_path.exists() or csv_path.stat().st_size == 0
     session_uuid = str(uuid.uuid4())
+    raw_path = raw_dir / f"{session_uuid}.u8"
     linhas_gravadas = 0
 
-    somas = [f["soma_total"] for f in frames_registrados]
-    raw_mean = float(np.mean(somas)) if somas else 0.0
-    raw_std = float(np.std(somas)) if len(somas) > 1 else 0.0
-    is_stable = raw_std <= 25.0
+    # Média e desvio só da parte estável; sem trecho estável, fica vazio
+    somas_estaveis = [f["soma_total"] for f in frames_registrados if f["estavel"]]
+    raw_mean = round(float(np.mean(somas_estaveis)), 4) if somas_estaveis else ""
+    raw_std = round(float(np.std(somas_estaveis)), 4) if len(somas_estaveis) > 1 else ""
+    sessao_estavel = bool(somas_estaveis)
+    ts = next((f["stabilization_time_s"] for f in frames_registrados if f["stabilization_time_s"] is not None), None)
+
+    with raw_path.open("wb") as raw_f:
+        for frame in frames_registrados:
+            raw_f.write(frame["raw"].tobytes(order="C"))
 
     with csv_path.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if novo:
             writer.writerow(headers)
 
-        for frame in frames_registrados:
+        for idx, frame in enumerate(frames_registrados):
             row = [
-                datetime.now(timezone.utc).astimezone().isoformat(),
+                frame["timestamp_iso"],
                 session_uuid,
-                "2.1.0",
+                SOFTWARE_VERSION,
                 round(peso_real_kg, 4),
                 posicao,
                 repeticao,
                 direction.upper(),
                 cycle_id,
-                is_stable,
-                round(duracao_s, 2),
+                1 if sessao_estavel else 0,
+                round(ts, 3) if ts is not None else "",
                 round(baseline_raw, 4),
-                round(raw_mean, 4),
-                round(raw_std, 4),
+                raw_mean,
+                raw_std,
                 block_id,
                 cell_id,
                 *(round(float(b), 4) for b in frame["b_vals"]),
                 round(frame["soma_total"], 4),
+                round(frame["soma_corrigida"], 4),
                 frame["tempo_s"],
-                1 if is_stable else 0,
-                0.0,
+                frame["estado"],
+                frame["estavel"],
+                f"raw/{raw_path.name}",
+                idx,
+                round(duracao_s, 2),
             ]
             writer.writerow(row)
             linhas_gravadas += 1
@@ -259,25 +286,22 @@ def carregar_contadores_repeticao(sessions_dir: Path) -> dict[tuple[float, str],
     """Descobre a maior repetição já gravada para cada par (peso_real_kg, posicao) hoje."""
     counters: dict[tuple[float, str], int] = {}
     hoje_str = datetime.now(timezone.utc).strftime("%Y%m%d")
-    csv_path = sessions_dir / f"calib_wide_{hoje_str}.csv"
-    if not csv_path.exists():
-        return counters
-
-    try:
-        with csv_path.open("r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    p = round(float(row.get("peso_real_kg", 0.0)), 2)
-                    pos = str(row.get("posicao", "center")).strip()
-                    rep = int(row.get("repeticao", 1))
-                    key = (p, pos)
-                    if rep > counters.get(key, 0):
-                        counters[key] = rep
-                except (ValueError, TypeError):
-                    continue
-    except Exception:
-        pass
+    for csv_path in sessions_dir.glob(f"calib_wide_{hoje_str}*.csv"):
+        try:
+            with csv_path.open("r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        p = round(float(row.get("peso_real_kg", 0.0)), 2)
+                        pos = str(row.get("posicao", "center")).strip()
+                        rep = int(row.get("repeticao", 1))
+                        key = (p, pos)
+                        if rep > counters.get(key, 0):
+                            counters[key] = rep
+                    except (ValueError, TypeError):
+                        continue
+        except Exception:
+            pass
     return counters
 
 
@@ -288,13 +312,14 @@ def main() -> None:
     print("=" * 70)
     print(" SAMEL MACA INTELIGENTE — ASSISTENTE DE CALIBRAÇÃO DE PESO")
     print("=" * 70)
-    print("Este utilitário registra ensaios de peso real e calibra a TARA.")
-    print("Para calibrar o ZERO/TARA, basta digitar 0 quando solicitado o peso.\n")
+    print("Este utilitário registra ensaios de peso real e a TARA.")
+    print("Para registrar a TARA, digite 0 quando solicitado o peso.\n")
 
     dev = conectar_hid()
     print("[✓] Manta USB HID conectada com sucesso.")
 
     rep_counters = carregar_contadores_repeticao(sessions_dir)
+    baseline: np.ndarray | None = None
 
     posicoes_map = {
         "1": "center",
@@ -321,10 +346,17 @@ def main() -> None:
                 print("[!] Valor de peso inválido. Digite um número (ex: 0, 50, 72.5).")
                 continue
 
-            # Se digitou 0 -> Calibração de TARA
+            # Se digitou 0 -> TARA
             if peso_kg == 0.0:
-                executar_tara(dev, sessions_dir, duracao_s=5.0)
+                dur_str = input("Duração da tara em segundos [padrão 5s]: ").strip() or "5"
+                dur_tara = float(dur_str) if dur_str.replace(".", "").isdigit() else 5.0
+                nova = executar_tara(dev, sessions_dir, duracao_s=dur_tara)
+                if nova is not None:
+                    baseline = nova
                 continue
+
+            if baseline is None:
+                print("[!] Ainda não há tara nesta execução: a estabilidade será avaliada sobre o RAW sem baseline.")
 
             print("\nEscolha a posição da carga na maca:")
             print("  1. Centro (center — B2, B3, B6, B7)")
@@ -348,12 +380,12 @@ def main() -> None:
             ciclo_str = input("Número do ciclo independente [padrão 1]: ").strip() or "1"
             cycle_id = int(ciclo_str) if ciclo_str.isdigit() else 1
 
-            dur_str = input("Tempo de amostragem em segundos [padrão 15s]: ").strip() or "15"
-            duracao = float(dur_str) if dur_str.replace(".", "").isdigit() else 15.0
+            dur_str = input("Tempo de amostragem em segundos [padrão 60s]: ").strip() or "60"
+            duracao = float(dur_str) if dur_str.replace(".", "").isdigit() else 60.0
 
-            input(f"\n-> Posicione {peso_kg} kg ({direction}) na maca e pressione ENTER para iniciar...")
+            input(f"\n-> Pressione ENTER e posicione {peso_kg} kg ({direction}) na maca...")
 
-            frames_registrados, b_medias, soma_media = coletar_amostra(dev, duracao, is_tare=False)
+            frames_registrados, b_medias, soma_media = coletar_amostra(dev, duracao, is_tare=False, baseline=baseline)
 
             if not frames_registrados:
                 print("[!] Nenhum dado detectado. Verifique se o peso foi posicionado.")
@@ -363,6 +395,8 @@ def main() -> None:
             for i, b_val in enumerate(b_medias):
                 print(f"  B{i+1}: {b_val:7.1f}", end="  " if (i + 1) % 4 != 0 else "\n")
             print(f"  Soma Média: {soma_media:.1f}")
+            if not any(f["estavel"] for f in frames_registrados):
+                print("[!] O sinal não estabilizou. Considere repetir com um patamar mais longo.")
 
             conf = input(f"\nDeseja salvar este ensaio ({len(frames_registrados)} frames)? (S/n): ").strip().lower()
             if conf in ("", "s", "sim", "y", "yes"):
@@ -375,6 +409,7 @@ def main() -> None:
                     duracao,
                     direction=direction,
                     cycle_id=cycle_id,
+                    baseline_raw=float(baseline.sum()) if baseline is not None else 0.0,
                 )
                 rep_counters[rep_key] = repeticao
                 print(f"[✓] {total_f} frames gravados com sucesso (Ciclo #{cycle_id}, {direction}) em: {arquivo_salvo.name}")
@@ -382,15 +417,6 @@ def main() -> None:
     finally:
         dev.close()
         print("\nDispositivo USB liberado.")
-
-    print("\n" + "=" * 70)
-    re_train = input("Deseja re-treinar o modelo de Machine Learning com as novas amostras agora? (S/n): ").strip().lower()
-    if re_train in ("", "s", "sim", "y", "yes"):
-        import subprocess
-        python_exe = sys.executable
-        train_script = base_dir / "scripts" / "train_weight_model.py"
-        print("\n[+] Executando treinamento...")
-        subprocess.run([python_exe, str(train_script)])
 
 
 if __name__ == "__main__":

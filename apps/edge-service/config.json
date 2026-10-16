@@ -11,5 +11,17 @@
   "cb_recovery_timeout_sec": 30.0,
   "server_host": "0.0.0.0",
   "server_port": 8000,
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "mass_model": "auto",
+  "acquisition": {},
+  "active_blocks": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ]
 }

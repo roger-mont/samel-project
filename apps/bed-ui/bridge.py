@@ -19,19 +19,17 @@ def get_sensor_data() -> dict[str, Any]:
         return live
     return {
         "heatmap": [],
-        "weight_kg": 0.0,
-        "force_n": 0.0,
+        "weight_kg": None,
+        "weight_status": "NO_LOAD",
+        "last_valid_weight_kg": None,
         "static_seconds": 0,
         "is_alert": False,
         "status": "desconectado",
         "is_locked": False,
         "locked_weight_kg": 0.0,
         "stable_progress_pct": 0.0,
-        "state_id": "SEM CARGA",
+        "state_id": "SEM_CARGA",
         "state_label": "SEM CARGA",
-        "matrix_delta": 0.0,
-        "temporal_delta": 0.0,
-        "dispersion_sigma": 0.0,
         "posture_info": {
             "posture": "Leito Livre",
             "asymmetry_pct": 0.0,
@@ -61,7 +59,6 @@ def get_calibration() -> dict[str, Any]:
     """Retorna parâmetros de calibração vigentes."""
     return EdgeClient.get_calibration_params() or {
         "deadzone_threshold": 10.0,
-        "ema_alpha": 0.5,
         "posture_tolerance": 0.15,
         "posture_timeout_seconds": 3600,
     }

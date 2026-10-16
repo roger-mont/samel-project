@@ -62,6 +62,13 @@ class ConfigManager:
             "server_host": "0.0.0.0",
             "server_port": 8000,
             "log_level": "INFO",
+            # Modelo de massa: auto | block_curves. Só as curvas por bloco geradas dos
+            # CSVs de docs/ estão registradas; ML e calibration.json antigos ficam fora.
+            "mass_model": "auto",
+            # Sobrescritas dos parâmetros de aquisição (core.settings.CalibrationParams)
+            "acquisition": {},
+            # Blocos 16×16 que entram na medição (estados, modelo, saturação)
+            "active_blocks": [1, 2, 3, 4, 5, 6, 7, 8],
         }
         self.reload()
 

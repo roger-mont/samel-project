@@ -1,11 +1,14 @@
-"""Constantes de hardware, física e parâmetros de calibração editáveis em runtime."""
+"""Constantes de hardware e parâmetros de aquisição editáveis em runtime."""
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 from dataclasses import dataclass, field, fields
+from typing import Any
 
 
-SOFTWARE_VERSION: str = "1.0.0"
+SOFTWARE_VERSION: str = "2.0.0"
 
 # Dimensões da matriz da manta sensora FSR (WangYing)
 HID_VID: int = 6860   # Vendor ID  (0x1ACC)
@@ -14,42 +17,38 @@ HID_ROWS: int = 32
 HID_COLS: int = 64
 HID_PACKET_SIZE: int = 64  # bytes por report HID
 
-# Dimensões físicas reais da manta para integração de força (Modelo B)
-MANTA_WIDTH_M: float = 0.90    # largura da maca (m)
-MANTA_HEIGHT_M: float = 1.80   # comprimento da maca (m)
-PIXEL_AREA_M2: float = (MANTA_WIDTH_M / HID_COLS) * (MANTA_HEIGHT_M / HID_ROWS)
-
-TARE_SAMPLE_COUNT: int = 5
-
-# Critérios metrológicos de estabilidade e Média Móvel Contínua (60s)
-STABILITY_EPSILON_KG: float = 0.5       # |Δm| máximo entre frames consecutivos
-STABILITY_TMIN_S: float = 10.0          # janela mínima para progresso de estabilidade
-STABILITY_VARIANCE_KG2: float = 0.5    # variância máxima da janela
-STABILITY_DRIFT_KG_S: float = 0.8      # drift máximo em kg/s
-STABILITY_WINDOW_SIZE: int = 40         # frames na janela de variância/drift
-WEIGHT_WINDOW_SECONDS: float = 60.0    # janela de média móvel contínua (1 minuto)
-FAST_RESET_THRESHOLD_KG: float = 2.0   # degrau que aciona reset imediato do buffer móvel
-
-# Critérios da Máquina de Estados e Decisão de Leitura (Documento Atividades do Roger)
-STABILITY_EPSILON_RAW: float = 25.0       # tolerância epsilon em D(t) = |s_bar(t) - s_bar(t-Dt)|
-STABILITY_SIGMA_MAX: float = 15.0         # desvio padrão máximo sigma_max
-STABILITY_DEFAULT_TMIN_S: float = 15.0    # tempo mínimo contínuo padrão (s)
-STABILITY_TEST_WINDOWS_S: tuple[float, ...] = (10.0, 20.0, 30.0, 45.0, 60.0)
-MOTION_DMAX_MATRIX: float = 250.0         # Dmax diferencial para movimento na matriz 32x64
-EMPTY_BED_MAX_RAW_SUM: float = 60.0       # soma máxima para leito considerado sem carga
+# Maior valor que o conversor da manta entrega (resposta digital RAW de 8 bits)
+RAW_MAX: int = 255
 
 
 @dataclass
 class CalibrationParams:
-    """Parâmetros de calibração e limiares clínicos mutáveis em runtime."""
+    """Parâmetros de aquisição, estabilidade e limiares clínicos mutáveis em runtime.
 
-    deadzone_threshold: float = 10.0      # ignora leituras brutas <= este limiar
-    ema_alpha: float = 0.5               # suavização exponencial do peso total
-    posture_tolerance: float = 0.15       # tolerância de assimetria postural
-    posture_timeout_seconds: int = 3600  # tempo máximo sem rotação (60 min)
-    stability_tmin_seconds: float = 15.0 # tempo mínimo para confirmação estável
-    motion_dmax_matrix: float = 250.0    # limiar diferencial de movimento matricial
-    stability_epsilon_raw: float = 25.0  # limiar epsilon para derivada temporal
+    Os limiares de estabilidade ainda não são constantes definitivas: os valores
+    padrão são pontos de partida, a serem ajustados pelos experimentos.
+    Limiares "_rel" são frações da soma corrigida da manta (ex.: 0.02 = 2%).
+    """
+
+    deadzone_threshold: float = 10.0        # zera leituras <= limiar no mapa de calor e na postura
+    posture_tolerance: float = 0.15         # tolerância de assimetria postural
+    posture_timeout_seconds: int = 3600     # tempo máximo sem rotação (60 min)
+
+    # Baseline espacial (tara)
+    t_tare_s: float = 5.0                   # T_TARE: duração da aquisição da tara
+    baseline_std_max_raw: float = 3.0       # desvio médio por célula aceito na tara (BASELINE_OK)
+    auto_rezero_empty_s: float = 30.0       # tempo com maca vazia antes da tara automática
+
+    # Detecção de carga, estabilidade e movimento
+    load_threshold_raw: float = 150.0       # soma corrigida acima da qual há carga
+    stability_window_s: float = 1.0         # STABILITY_WINDOW: janela de média e desvio
+    stability_lag_s: float = 1.0            # Δt de D(t) e de D_M(t)
+    std_threshold_rel: float = 0.02         # STD_THRESHOLD: σ/μ máximo
+    delta_threshold_rel: float = 0.01       # DELTA_THRESHOLD: D/μ máximo
+    min_stable_time_s: float = 15.0         # MIN_STABLE_TIME: tempo contínuo com o critério atendido
+    movement_threshold_rel: float = 0.15    # D_mov: D_M/μ acima do qual há movimento
+    saturation_raw: float = float(RAW_MAX)  # leitura que marca célula saturada
+
     _lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,
@@ -64,6 +63,14 @@ class CalibrationParams:
             expected_type = type(getattr(self, key))
             setattr(self, key, expected_type(value))
 
+    def apply_overrides(self, overrides: dict[str, Any]) -> None:
+        """Aplica valores vindos do config.json, ignorando chaves desconhecidas."""
+        for key, value in overrides.items():
+            try:
+                self.update(key, value)
+            except (ValueError, TypeError):
+                continue
+
     def snapshot(self) -> dict:
         """Retorna snapshot imutável dos parâmetros."""
         with self._lock:
@@ -72,3 +79,8 @@ class CalibrationParams:
                 for f in fields(self)
                 if not f.name.startswith("_")
             }
+
+    def configuration_id(self, extra: dict[str, Any] | None = None) -> str:
+        """Identificador curto e determinístico do conjunto de parâmetros em vigor."""
+        payload = json.dumps({**self.snapshot(), **(extra or {})}, sort_keys=True)
+        return "CFG-" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]

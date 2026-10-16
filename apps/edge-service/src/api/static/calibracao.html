@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibração da manta</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3f0;
+    --surface-1: #fcfcfb;
+    --border: #e2e0da;
+    --grid: #ebe9e4;
+    --axis: #9a988f;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7872;
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+    --series-5: #e87ba4; --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948;
+    --band: #efeee9;
+    --row-hl: #eef4fc;
+    --critical: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --seq-0: #cde2fb; --seq-1: #9ec5f4; --seq-2: #6da7ec; --seq-3: #3987e5;
+    --seq-4: #256abf; --seq-5: #184f95; --seq-6: #0d366b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2b; --grid: #262624; --axis: #6f6e68;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+      --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+      --band: #242422; --row-hl: #1d2a3b;
+      /* no escuro, valor baixo recua para a superfície e valor alto clareia */
+      --seq-0: #104281; --seq-1: #184f95; --seq-2: #256abf; --seq-3: #3987e5;
+      --seq-4: #6da7ec; --seq-5: #9ec5f4; --seq-6: #cde2fb;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2b; --grid: #262624; --axis: #6f6e68;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --band: #242422; --row-hl: #1d2a3b;
+    --seq-0: #104281; --seq-1: #184f95; --seq-2: #256abf; --seq-3: #3987e5;
+    --seq-4: #6da7ec; --seq-5: #9ec5f4; --seq-6: #cde2fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header { padding: 16px 24px 8px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .muted { color: var(--text-secondary); }
+  .small { font-size: 12px; color: var(--text-muted); }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+  main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; padding: 8px 24px 24px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) { header, main { padding-left: 16px; padding-right: 16px; } }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .lead { margin: 0 0 12px; color: var(--text-secondary); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 8px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .sw.line { width: 16px; height: 2px; border-radius: 1px; }
+  .sw.hollow { background: transparent !important; border: 2px solid; width: 10px; height: 10px; }
+  svg text { fill: var(--text-secondary); font-size: 11px; }
+  .chart-wrap { position: relative; }
+  .tip {
+    position: absolute; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; display: none; z-index: 5;
+  }
+  .tip .row { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .tip .row b { margin-left: auto; padding-left: 12px; font-weight: 600; }
+  .status { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin-bottom: 12px; }
+  .hero { font-size: 32px; font-weight: 650; }
+  .live { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 640px) { .live { grid-template-columns: 1fr; } }
+  .sectors { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
+  .tile.off { opacity: .45; }
+  .tile .name { font-size: 12px; color: var(--text-secondary); }
+  .tile .mass { font-size: 20px; font-weight: 650; }
+  .tile .meta { font-size: 12px; color: var(--text-muted); }
+  .tile .warn { font-size: 12px; color: var(--text-primary); margin-top: 2px; }
+  .tile .warn b { color: var(--critical); }
+  .heat-wrap { position: relative; }
+  canvas { display: block; image-rendering: pixelated; border-radius: 4px; max-width: 100%; }
+  .scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+  .scale .bar { width: 120px; height: 8px; border-radius: 4px;
+    background: linear-gradient(90deg, var(--seq-0), var(--seq-2), var(--seq-4), var(--seq-6)); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--text-secondary); }
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 6px; }
+  th, td { padding: 4px 12px 4px 0; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border); }
+  tr.hl td { background: var(--row-hl); }
+  td .name { display: inline-flex; align-items: center; gap: 6px; }
+  ul.notes { margin: 8px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
+  .err { color: var(--critical); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 0 0 8px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    font: inherit; font-size: 12px; padding: 4px 10px; border: 0; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary);
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); font-weight: 600; }
+  .picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; max-width: 380px; margin: 0 0 8px; }
+  .picker button {
+    font: inherit; font-size: 12px; text-align: left; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+  }
+  .picker button[aria-pressed="true"] { border-color: var(--text-primary); color: var(--text-primary); font-weight: 600; }
+  .kv { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; }
+  .kv b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+  label.field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  input[type="number"] {
+    font: inherit; font-size: 13px; width: 96px; padding: 3px 6px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button.action {
+    font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button.action:disabled { opacity: .45; cursor: default; }
+  button.action.primary { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); font-weight: 600; }
+  button.action.link { border-color: transparent; background: transparent; color: var(--text-secondary); text-decoration: underline; padding: 2px 4px; }
+  input[type="text"] {
+    font: inherit; font-size: 13px; width: 220px; max-width: 100%; padding: 3px 6px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+
+  /* Ajuste de ganho */
+  .gain-steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
+  .gain-steps > li.full { grid-column: 1 / -1; }
+  @media (max-width: 1100px) { .gain-steps { grid-template-columns: 1fr; } }
+  .step { border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0; display: grid; gap: 8px; align-content: start; }
+  .step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .step-head h3 { font-size: 14px; margin: 0; }
+  .step-head .num { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; flex: none;
+    font-size: 12px; font-weight: 700; background: var(--band); color: var(--text-primary); }
+  .step.done .step-head .num { background: var(--good); color: #fff; }
+  .step p { margin: 0; }
+  .pill { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+  .pill::before { margin-right: 4px; }
+  .pill.ok::before { content: "●"; color: var(--good); }
+  .pill.wait::before { content: "◐"; color: var(--warning); }
+  .pill.bad::before { content: "▲"; color: var(--critical); }
+  .pill.idle::before { content: "○"; color: var(--text-muted); }
+  .progress { width: 160px; height: 6px; border-radius: 3px; background: var(--band); overflow: hidden; }
+  .progress > i { display: block; height: 100%; background: var(--series-1); transition: width .3s; }
+  .confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; background: var(--band); font-size: 12px; }
+  .ok-msg { color: var(--text-primary); }
+  .ok-msg::before { content: "● "; color: var(--good); }
+  .fit-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .fit-grid { grid-template-columns: 1fr; } }
+  .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .metric { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-variant-numeric: tabular-nums; min-width: 0; }
+  .metric.main { border-color: var(--text-primary); }
+  .metric .k { font-size: 12px; color: var(--text-secondary); }
+  .metric .v { font-size: 18px; font-weight: 650; }
+  .metric .s { font-size: 12px; color: var(--text-muted); }
+  ul.warn-list { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-primary); }
+  ul.warn-list li::marker { content: "▲ "; color: var(--warning); }
+  @media (prefers-reduced-motion: reduce) { .progress > i { transition: none; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Calibração da manta</h1>
+  <span class="badge" id="version">carregando…</span>
+  <span class="small" id="sources"></span>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Curvas RAW corrigido → massa local por célula</h2>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="O que mostrar" id="view">
+        <button type="button" data-view="all">Todos os setores</button>
+        <button type="button" data-view="sector">Um setor</button>
+        <button type="button" data-view="models">Modelos do setor</button>
+      </div>
+      <div class="seg" role="group" aria-label="Ajuste dos modelos" id="fit-mode" hidden>
+        <button type="button" data-mode="sector">Ajuste por setor</button>
+        <button type="button" data-mode="global">Ajuste global</button>
+      </div>
+    </div>
+    <div class="picker" id="picker" role="group" aria-label="Setor"></div>
+    <p class="lead" id="curve-lead">Carregando as curvas…</p>
+    <div class="kv" id="curve-kv"></div>
+    <div class="legend" id="curve-legend"></div>
+    <div class="chart-wrap" id="curve-wrap">
+      <svg id="curve" role="img" aria-label="Curvas de calibração RAW para massa" width="100%" viewBox="0 0 640 380"></svg>
+      <div class="tip" id="curve-tip"></div>
+    </div>
+    <details>
+      <summary id="table-summary">Tabela</summary>
+      <div class="table-scroll"><table id="fit-table"></table></div>
+    </details>
+    <ul class="notes" id="notes"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Extração ao vivo, setores na ordem física</h2>
+    <p class="lead">Cada célula passa pela curva do seu setor (massa local); a massa do setor é α<sub>s</sub> × a soma das células. Média da janela de estabilidade, atualizada a cada 0,5 s.</p>
+    <div class="status">
+      <div>
+        <div class="small">Massa estimada (setores ativos)</div>
+        <div class="hero" id="total">—</div>
+      </div>
+      <div>
+        <div class="small">Estado da leitura</div>
+        <div id="state">—</div>
+      </div>
+      <div>
+        <div class="small">Peso validado</div>
+        <div id="valid">—</div>
+      </div>
+    </div>
+    <div class="live">
+      <div class="heat-wrap" id="heat-wrap">
+        <canvas id="heat" width="256" height="512" aria-label="Mapa de massa por célula, cabeceira no alto"></canvas>
+        <div class="tip" id="heat-tip"></div>
+        <div class="scale"><span>0 g</span><span class="bar"></span><span id="scale-max">275 g</span><span>· massa local</span></div>
+        <div class="scale"><span class="sw" style="background:transparent;border:2px solid var(--critical);border-radius:2px"></span><span>acima da faixa calibrada</span></div>
+      </div>
+      <div>
+        <div class="small" style="margin-bottom:6px">Cabeceira (cabo no setor 1)</div>
+        <div class="sectors" id="sectors"></div>
+        <div class="small" style="margin-top:6px">Peseira</div>
+      </div>
+    </div>
+    <p class="small err" id="live-error"></p>
+  </section>
+
+  <section class="card wide" id="gain-card">
+    <h2>Ajuste de ganho α (massa local → massa total)</h2>
+    <p class="lead">Corrige a soma das curvas com cargas de peso conhecido: M = Σ α<sub>s</sub> · L<sub>s</sub>. As curvas por célula não mudam; o α multiplica a massa de cada setor.
+      Siga os passos na ordem. Nada é gravado nas curvas até você clicar em <b>Aplicar ganhos</b>.</p>
+    <div class="kv" id="gain-status">Carregando os ganhos…</div>
+    <ol class="gain-steps">
+      <li class="step" id="step-tare">
+        <div class="step-head"><span class="num">1</span><h3>Zerar a maca</h3><span class="pill idle" id="tare-pill">—</span></div>
+        <p class="small">Tire tudo de cima da maca e faça a tara. Refaça sempre que começar uma sessão de ajuste.</p>
+        <div class="controls"><button type="button" class="action" id="gain-tare">Fazer tara</button><span class="small" id="tare-info"></span></div>
+        <div class="confirm" id="tare-confirm" hidden>
+          <span id="tare-confirm-text"></span>
+          <button type="button" class="action" id="tare-confirm-yes">Fazer a tara assim mesmo</button>
+          <button type="button" class="action link" id="tare-confirm-no">Cancelar</button>
+        </div>
+        <p class="small" id="tare-msg"></p>
+      </li>
+
+      <li class="step" id="step-capture">
+        <div class="step-head"><span class="num">2</span><h3>Registrar pontos</h3><span class="pill idle" id="cap-pill">—</span></div>
+        <p class="small">Ponha a carga espalhada sobre uma placa, informe o peso real e espere o estado ficar <b>Estável</b>. O ponto usa a média dos últimos 5 s estáveis da manta inteira.
+          Varie o peso e a posição: cabeceira, meio, peseira, lado direito e esquerdo.</p>
+        <div class="controls">
+          <div class="progress" aria-hidden="true"><i id="cap-progress" style="width:0%"></i></div>
+          <span class="small" id="cap-live">—</span>
+        </div>
+        <div class="controls">
+          <label class="field">Peso real (kg) <input type="number" id="gain-kg" min="0" step="0.01" inputmode="decimal"></label>
+          <label class="field">Posição <input type="text" id="gain-note" maxlength="80" placeholder="ex.: placa no centro" autocomplete="off"></label>
+          <button type="button" class="action primary" id="gain-register" disabled>Registrar ponto</button>
+        </div>
+        <p class="small" id="cap-hint"></p>
+        <p class="small" id="cap-msg"></p>
+      </li>
+
+      <li class="step full" id="step-points">
+        <div class="step-head"><span class="num">3</span><h3>Conferir os pontos</h3><span class="pill idle" id="pts-pill">0 pontos</span></div>
+        <p class="small" id="pts-empty">Nenhum ponto registrado. Os pontos ficam gravados no edge-service e continuam lá se você fechar a página.</p>
+        <div class="table-scroll"><table id="pts-table"></table></div>
+        <div class="controls">
+          <button type="button" class="action" id="pts-clear" disabled>Apagar todos os pontos</button>
+          <div class="confirm" id="pts-confirm" hidden>
+            <span>Apagar os <b id="pts-confirm-n">0</b> pontos registrados?</span>
+            <button type="button" class="action" id="pts-confirm-yes">Apagar</button>
+            <button type="button" class="action link" id="pts-confirm-no">Cancelar</button>
+          </div>
+        </div>
+        <p class="small" id="pts-msg"></p>
+      </li>
+
+      <li class="step full" id="step-fit">
+        <div class="step-head"><span class="num">4</span><h3>Calcular e aplicar</h3><span class="pill idle" id="fit-pill">—</span></div>
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Tipo de ganho" id="gain-mode">
+            <button type="button" data-mode="global">Um α para a manta</button>
+            <button type="button" data-mode="setor">Um α por setor</button>
+          </div>
+          <label class="field" id="gain-lam-field" hidden>λ <input type="number" id="gain-lam" min="0" step="0.1" value="1"></label>
+          <button type="button" class="action" id="gain-calc" disabled>Calcular</button>
+        </div>
+        <p class="small" id="gain-mode-hint"></p>
+        <div id="fit-result" hidden>
+          <div class="fit-grid">
+            <div style="display:grid;gap:12px;min-width:0">
+              <div class="metrics" id="fit-metrics"></div>
+              <div class="table-scroll"><table id="fit-alpha"></table></div>
+              <ul class="warn-list" id="fit-warnings"></ul>
+            </div>
+            <div style="min-width:0">
+              <div class="legend" id="fit-legend"></div>
+              <svg id="fit-chart" role="img" aria-label="Massa estimada contra peso real, antes e depois do ajuste" width="100%" viewBox="0 0 640 380"></svg>
+            </div>
+          </div>
+        </div>
+        <div class="controls">
+          <button type="button" class="action primary" id="gain-apply" disabled>Aplicar ganhos</button>
+          <button type="button" class="action" id="gain-reset">Voltar para α = 1</button>
+          <div class="confirm" id="reset-confirm" hidden>
+            <span>Voltar todos os ganhos para 1? Os pontos registrados continuam.</span>
+            <button type="button" class="action" id="reset-confirm-yes">Voltar para α = 1</button>
+            <button type="button" class="action link" id="reset-confirm-no">Cancelar</button>
+          </div>
+        </div>
+        <p class="small" id="fit-msg"></p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="card wide">
+    <h2>Comparação de modelos ao vivo (curvas e ML)</h2>
+    <p class="lead">Todos os modelos recebem a mesma janela da manta. Só diagnóstico: o peso validado continua vindo da curva em vigor.
+      Ponha uma carga conhecida, informe o peso real e registre a leitura quando o estado for <b>Válido</b> ou <b>Estável</b>; o erro acumulado de cada modelo aparece no resumo.
+      Estes registros não mudam o ganho; para isso, use o <a href="#gain-card">ajuste de ganho α</a>.</p>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Ajuste dos modelos na comparação" id="cmp-mode">
+        <button type="button" data-mode="sector">Ajuste por setor</button>
+        <button type="button" data-mode="global">Ajuste global</button>
+      </div>
+      <label class="field">Peso real na maca (kg) <input type="number" id="real-kg" min="0" step="0.01" inputmode="decimal"></label>
+      <button type="button" class="action" id="record">Registrar leitura</button>
+      <span class="small" id="cmp-state">Treinando os modelos na primeira leitura…</span>
+    </div>
+    <div class="table-scroll"><table id="cmp-table"></table></div>
+    <h2 style="margin-top:16px">Leituras registradas</h2>
+    <p class="small" id="rec-empty">Nenhuma leitura registrada. Elas ficam só nesta aba do navegador; baixe o CSV antes de fechar.</p>
+    <div class="table-scroll"><table id="rec-summary"></table></div>
+    <details id="rec-details" hidden>
+      <summary>Cada leitura</summary>
+      <div class="table-scroll"><table id="rec-table"></table></div>
+    </details>
+    <div class="controls" style="margin-top:8px">
+      <button type="button" class="action" id="rec-csv" disabled>Baixar CSV</button>
+      <button type="button" class="action" id="rec-clear" disabled>Limpar registros</button>
+    </div>
+    <p class="small err" id="cmp-error"></p>
+  </section>
+</main>
+
+<script>
+(() => {
+  const fmt = (v, d = 0) => Number(v).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const massText = (kg) => kg >= 1 ? `${fmt(kg, 2)} kg` : `${fmt(kg * 1000, 0)} g`;
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const slot = (i) => `--series-${i + 1}`;
+  const SECTOR_NAMES = {
+    1: "cabeceira · direito", 8: "cabeceira · esquerdo",
+    2: "2º · direito", 7: "2º · esquerdo",
+    3: "3º · direito", 6: "3º · esquerdo",
+    4: "peseira · direito", 5: "peseira · esquerdo",
+  };
+  const LAYOUT = [[1, 8], [2, 7], [3, 6], [4, 5]];
+  const STATE_TEXT = {
+    NO_LOAD: "Sem carga", LOAD_DETECTED: "Carga detectada", STABILIZING: "Estabilizando",
+    MOVEMENT: "Movimento", NOT_VALIDATED: "Estável, não validado", VALID: "Válido",
+  };
+  const ACTIVE_MODEL = "pchip_isotonica";
+
+  let curves = null;              // /calibration/curves
+  let view = "all";               // all | sector | models
+  let sectorId = "2";
+  let fitMode = "sector";         // modo das curvas dos modelos no gráfico
+  let cmpMode = "sector";         // modo da tabela de comparação
+  let modelCurves = {};           // cache "modo:setor" → resposta
+  let massMaxG = 275;
+  // Atalhos pela URL: ?view=all|sector|models&setor=1..8&modo=sector|global
+  const params = new URLSearchParams(location.search);
+  if (["all", "sector", "models"].includes(params.get("view"))) view = params.get("view");
+  if (/^[1-8]$/.test(params.get("setor") || "")) sectorId = params.get("setor");
+  if (["sector", "global"].includes(params.get("modo"))) fitMode = cmpMode = params.get("modo");
+
+  const pressSeg = (groupId, attr, value) => document.querySelectorAll(`#${groupId} button`).forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset[attr] === value)));
+
+  // ---------------------------------------------------------------- curvas
+  async function fetchCurves() {
+    const r = await fetch("/api/v1/calibration/curves", { cache: "no-store" });
+    if (!r.ok) throw new Error(`curvas: HTTP ${r.status}`);
+    curves = await r.json();
+    const all = Object.values(curves.sectors);
+    massMaxG = Math.max(...all.map(s => s.mass_max_valid_kg)) * 1000;
+    document.getElementById("scale-max").textContent = `${fmt(massMaxG)} g`;
+    document.getElementById("version").textContent =
+      `${curves.calibration_version}${curves.provisional ? " · provisória" : ""}` +
+      `${curves.identical_in_all_sectors ? " · igual nos 8 setores" : " · uma curva por setor"}` +
+      `${curves.gains_calibrated ? " · ganhos α calibrados" : " · α = 1 (não calibrado)"}`;
+  }
+
+  async function loadCurves() {
+    await fetchCurves();
+    document.getElementById("notes").innerHTML = (curves.notes || []).map(n => `<li>${n}</li>`).join("");
+    document.getElementById("picker").innerHTML = LAYOUT.flat().map(id => {
+      const s = curves.sectors[String(id)];
+      const cells = s.cells.length ? s.cells.join(", ") : "curva global";
+      return `<button type="button" data-sector="${id}">Setor ${id} · ${cells}</button>`;
+    }).join("");
+    document.querySelectorAll("#picker button").forEach(b =>
+      b.addEventListener("click", () => { sectorId = b.dataset.sector; render(); }));
+    document.querySelectorAll("#view button").forEach(b =>
+      b.addEventListener("click", () => { view = b.dataset.view; render(); }));
+    document.querySelectorAll("#fit-mode button").forEach(b =>
+      b.addEventListener("click", () => { fitMode = b.dataset.mode; render(); }));
+    render();
+  }
+
+  async function render() {
+    pressSeg("view", "view", view);
+    pressSeg("fit-mode", "mode", fitMode);
+    pressSeg("picker", "sector", sectorId);
+    document.getElementById("picker").hidden = view === "all";
+    document.getElementById("fit-mode").hidden = view !== "models";
+    if (view === "all") return renderAll();
+    if (view === "sector") return renderSector();
+    return renderModels();
+  }
+
+  function trimmed(samples, rawMax) {
+    const out = samples.filter(([r]) => r <= rawMax + 1e-9);
+    return out.length ? out : samples;
+  }
+
+  function renderAll() {
+    const series = Object.keys(curves.sectors).map(Number).sort((a, b) => a - b).map((id, i) => {
+      const s = curves.sectors[String(id)];
+      return { name: `Setor ${id}`, sub: s.cells.join(", ") || "global", color: css(slot(i)),
+               samples: trimmed(s.samples_raw_mass_g, s.raw_max_valid), rawMax: s.raw_max_valid };
+    });
+    document.getElementById("sources").textContent = "";
+    document.getElementById("curve-lead").textContent =
+      "As 8 curvas da calibração em vigor. Cada uma vai até o maior RAW medido na célula do setor; " +
+      "acima disso a célula fica fora da faixa calibrada. Passe o mouse para ler a massa de cada setor no mesmo RAW.";
+    document.getElementById("curve-kv").innerHTML = "";
+    legend(series.map(s => ({ color: s.color, text: `${s.name} · ${s.sub}` })));
+    drawLines(series, []);
+    const rows = Object.keys(curves.sectors).map(Number).sort((a, b) => a - b).map(id => {
+      const s = curves.sectors[String(id)];
+      const v = s.validation || {};
+      return `<tr><td>Setor ${id}</td><td style="text-align:left">${s.cells.join(", ") || "global"}</td>` +
+        `<td>${fmt(s.raw_max_valid, 1)}</td><td>${fmt(s.mass_max_valid_kg * 1000)} g</td>` +
+        `<td>${v.loo_rmse_g != null ? fmt(v.loo_rmse_g) + " g" : "—"}</td>` +
+        `<td>${v.up_curve_on_down_rmse_g != null ? fmt(v.up_curve_on_down_rmse_g) + " g" : "—"}</td>` +
+        `<td>${fmt(s.gain, 3)}</td></tr>`;
+    }).join("");
+    document.getElementById("table-summary").textContent = "Tabela dos setores";
+    document.getElementById("fit-table").innerHTML =
+      `<tr><th>Setor</th><th style="text-align:left">Células</th><th>RAW máx.</th><th>Massa máx.</th>` +
+      `<th>Erro LOO</th><th>Subida na descida</th><th>α</th></tr>${rows}`;
+  }
+
+  function renderSector() {
+    const c = curves.sectors[sectorId];
+    document.getElementById("sources").textContent = c.sources.length
+      ? "Fontes: " + c.sources.map(s => `${s.file.split("/").pop()} (${s.sha1.slice(0, 8)})`).join(", ")
+      : "Sem célula calibrada neste setor: curva global de todas as células";
+    document.getElementById("curve-lead").textContent =
+      `Setor ${sectorId} (${SECTOR_NAMES[sectorId]}). A curva vai de 0 a ${fmt(c.raw_max_valid, 1)} RAW ` +
+      `(0 a ${fmt(c.mass_max_valid_kg * 1000)} g por célula). Acima disso a célula fica fora da faixa calibrada e a curva para de crescer.`;
+    const v = c.validation || {};
+    const kv = [
+      ["Ganho α", fmt(c.gain, 3)],
+      ["Erro LOO", v.loo_rmse_g != null ? `${fmt(v.loo_rmse_g)} g` : "—"],
+      ["Curva de subida na descida", v.up_curve_on_down_rmse_g != null ? `${fmt(v.up_curve_on_down_rmse_g)} g` : "—"],
+      ["Baixa sensibilidade a partir de", c.low_sensitivity_raw != null ? `${fmt(c.low_sensitivity_raw, 1)} RAW` : "não definida"],
+    ];
+    document.getElementById("curve-kv").innerHTML = kv.map(([k, val]) => `<span>${k}: <b>${val}</b></span>`).join("");
+    const pts = [];
+    c.sources.forEach((s, si) => {
+      const name = s.cell || `${s.row}x${s.column}`;
+      const color = css(slot(si));
+      (s.points_down_not_used || []).forEach(p => pts.push({ cell: name, dir: "descida", raw: p.raw_corrected, g: p.mass_kg * 1000, color, hollow: true }));
+      s.points_up.forEach(p => pts.push({ cell: name, dir: "subida", raw: p.raw_corrected, g: p.mass_kg * 1000, color, hollow: false }));
+    });
+    const curveColor = css(slot(c.sources.length));
+    c.fit.forEach(f => pts.push({ cell: "média isotônica (nó da curva)", dir: "subida", raw: f.raw_isotonic, g: f.mass_kg * 1000, color: curveColor, knot: true }));
+    legend([
+      ...c.sources.map((s, i) => ({ color: css(slot(i)), text: `${s.cell || `${s.row}x${s.column}`} subida` })),
+      { color: css("--text-muted"), text: "descida (não usada no ajuste)", hollow: true },
+      { color: curveColor, text: "curva PCHIP sobre a média isotônica", line: true },
+    ]);
+    drawLines([{ name: `Setor ${sectorId}`, sub: "curva em vigor", color: curveColor,
+                 samples: c.samples_raw_mass_g, rawMax: c.raw_max_valid, band: true }], pts);
+    const head = c.sources.map(s => `<th>${s.cell || `${s.row}x${s.column}`} subida</th>`).join("");
+    const rows = c.fit.map(f => {
+      const cols = c.sources.map(s => {
+        const p = s.points_up.find(q => Math.abs(q.mass_kg - f.mass_kg) < 1e-9);
+        return `<td>${p ? fmt(p.raw_corrected, 2) : "—"}</td>`;
+      }).join("");
+      return `<tr><td>${fmt(f.mass_kg * 1000)} g</td>${cols}<td>${fmt(f.raw_mean, 2)}</td><td>${fmt(f.raw_isotonic, 2)}</td></tr>`;
+    }).join("");
+    document.getElementById("table-summary").textContent = "Tabela dos pontos de calibração";
+    document.getElementById("fit-table").innerHTML = `<tr><th>Massa</th>${head}<th>Média</th><th>Isotônica</th></tr>${rows}`;
+  }
+
+  async function renderModels() {
+    const key = `${fitMode}:${sectorId}`;
+    document.getElementById("curve-lead").textContent = "Treinando os modelos…";
+    if (!modelCurves[key]) {
+      const r = await fetch(`/api/v1/calibration/compare/curves?sector=${sectorId}&mode=${fitMode}`);
+      if (!r.ok) { document.getElementById("curve-lead").innerHTML = `<span class="err">modelos: HTTP ${r.status}</span>`; return; }
+      modelCurves[key] = await r.json();
+    }
+    if (view !== "models" || key !== `${fitMode}:${sectorId}`) return;  // o usuário trocou durante o fetch
+    const data = modelCurves[key];
+    const c = curves.sectors[sectorId];
+    const series = data.models.map((m, i) => ({ model: m.model, name: m.label, color: css(slot(i)),
+      samples: m.samples_raw_mass_g || [], rawMax: m.raw_max, available: m.available })).filter(s => s.available);
+    document.getElementById("sources").textContent = "";
+    document.getElementById("curve-lead").textContent = fitMode === "sector"
+      ? `Setor ${sectorId} (${SECTOR_NAMES[sectorId]}): cada modelo ajustado aos mesmos pontos da curva do setor (média da subida das células ${c.cells.join(", ") || "—"}).`
+      : `Ajuste global: cada modelo ajustado com a subida de todas as células juntas, a mesma curva para os 8 setores. Pontos do setor ${sectorId} para referência.`;
+    document.getElementById("curve-kv").innerHTML = "";
+    const pts = c.fit.map(f => ({ cell: "média do setor (subida)", dir: "subida", raw: f.raw_mean, g: f.mass_kg * 1000, color: css("--text-secondary") }));
+    legend([...series.map(s => ({ color: s.color, text: s.name })),
+            { color: css("--text-secondary"), text: `pontos medidos do setor ${sectorId}` }]);
+    drawLines(series, pts);
+    const grid = [5, 10, 20, 30, 50, 75, 100, 125];
+    const rows = series.map(s => `<tr><td><span class="name"><i class="sw" style="background:${s.color}"></i>${s.name}</span></td>` +
+      grid.map(x => `<td>${x > s.rawMax ? "—" : fmt(interp(s.samples, x), 0)}</td>`).join("") + "</tr>").join("");
+    document.getElementById("table-summary").textContent = "Tabela: massa por célula (g) em alguns RAW";
+    document.getElementById("fit-table").innerHTML = `<tr><th>Modelo</th>${grid.map(x => `<th>RAW ${x}</th>`).join("")}</tr>${rows}`;
+  }
+
+  function legend(items) {
+    document.getElementById("curve-legend").innerHTML = items.map(it => {
+      const cls = it.line ? "sw line" : it.hollow ? "sw hollow" : "sw";
+      const style = it.hollow ? `border-color:${it.color}` : `background:${it.color}`;
+      return `<span><i class="${cls}" style="${style}"></i>${it.text}</span>`;
+    }).join("");
+  }
+
+  function interp(s, raw) {
+    if (!s.length) return 0;
+    if (raw <= s[0][0]) return s[0][1];
+    for (let i = 1; i < s.length; i++) {
+      if (raw <= s[i][0]) {
+        const t = (raw - s[i - 1][0]) / (s[i][0] - s[i - 1][0]);
+        return s[i - 1][1] + t * (s[i][1] - s[i - 1][1]);
+      }
+    }
+    return s[s.length - 1][1];
+  }
+
+  // Gráfico de linhas: uma ou mais séries RAW → g, mais pontos opcionais
+  function drawLines(series, pts) {
+    const svg = document.getElementById("curve");
+    const W = 640, H = 380, m = { l: 52, r: 16, t: 12, b: 40 };
+    const xs = [...series.map(s => s.band ? s.rawMax * 1.3 : s.rawMax), ...pts.map(p => p.raw)];
+    const ys = [...series.flatMap(s => s.samples.map(([, g]) => g)), ...pts.map(p => p.g)];
+    const xMax = Math.ceil(Math.max(20, ...xs) / 20) * 20;
+    const yMax = Math.ceil(Math.max(50, ...ys) * 1.05 / 50) * 50;
+    const X = v => m.l + (v / xMax) * (W - m.l - m.r);
+    const Y = v => H - m.b - (v / yMax) * (H - m.t - m.b);
+    const ns = "http://www.w3.org/2000/svg";
+    const el = (tag, attrs, parent = svg) => {
+      const e = document.createElementNS(ns, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+      parent.appendChild(e);
+      return e;
+    };
+    svg.innerHTML = "";
+    const banded = series.find(s => s.band);
+    if (banded) {
+      el("rect", { x: X(banded.rawMax), y: m.t, width: X(xMax) - X(banded.rawMax), height: H - m.t - m.b, fill: css("--band") });
+      el("text", { x: X(banded.rawMax) + 6, y: m.t + 14 }).textContent = "fora da faixa calibrada";
+    }
+    const yStep = yMax > 400 ? 100 : 50;
+    for (let v = 0; v <= yMax; v += yStep) {
+      el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: css("--grid") });
+      el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }).textContent = fmt(v);
+    }
+    for (let v = 0; v <= xMax; v += 20) {
+      el("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }).textContent = fmt(v);
+    }
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), stroke: css("--axis") });
+    el("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }).textContent = "RAW corrigido (resposta digital da célula)";
+    el("text", { x: 14, y: (m.t + H - m.b) / 2, "text-anchor": "middle", transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` })
+      .textContent = "Massa na célula (g)";
+
+    for (const s of series) {
+      const d = s.samples.map(([r, g], i) => `${i ? "L" : "M"}${X(r).toFixed(1)},${Y(g).toFixed(1)}`).join("");
+      el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
+      const end = s.samples.find(([r]) => r >= s.rawMax) || s.samples[s.samples.length - 1];
+      if (end) el("circle", { cx: X(end[0]), cy: Y(end[1]), r: 3, fill: s.color, stroke: css("--surface-1"), "stroke-width": 2 });
+    }
+    for (const p of pts) {
+      const attrs = { cx: X(p.raw), cy: Y(p.g), r: p.knot ? 3 : 4.5 };
+      if (p.hollow) Object.assign(attrs, { fill: css("--surface-1"), stroke: p.color, "stroke-width": 1.5, opacity: 0.8 });
+      else Object.assign(attrs, { fill: p.color, stroke: css("--surface-1"), "stroke-width": 2 });
+      el("circle", attrs);
+    }
+
+    const wrap = document.getElementById("curve-wrap");
+    const tip = document.getElementById("curve-tip");
+    const cross = el("line", { y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-dasharray": "3 3", visibility: "hidden" });
+    svg.onmousemove = ev => {
+      const box = svg.getBoundingClientRect();
+      const sx = (ev.clientX - box.left) * (W / box.width), sy = (ev.clientY - box.top) * (H / box.height);
+      let best = null, bestD = 12;
+      for (const p of pts) {
+        const dd = Math.hypot(X(p.raw) - sx, Y(p.g) - sy);
+        if (dd < bestD) { best = p; bestD = dd; }
+      }
+      let html;
+      if (best) {
+        cross.setAttribute("visibility", "hidden");
+        html = `<b>${best.cell}</b> · ${best.dir}<br>${fmt(best.g)} g · RAW ${fmt(best.raw, 2)}`;
+      } else {
+        const raw = ((sx - m.l) / (W - m.l - m.r)) * xMax;
+        if (raw < 0 || raw > xMax) { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); return; }
+        cross.setAttribute("x1", X(raw)); cross.setAttribute("x2", X(raw)); cross.setAttribute("visibility", "visible");
+        html = `<div>RAW ${fmt(raw, 1)}</div>` + series.map(s =>
+          `<div class="row"><i class="sw" style="background:${s.color}"></i>${s.name}` +
+          `<b>${raw > s.rawMax ? `${fmt(interp(s.samples, s.rawMax))} g ↑ fora da faixa` : `${fmt(interp(s.samples, raw), 1)} g`}</b></div>`).join("");
+      }
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      const wb = wrap.getBoundingClientRect();
+      tip.style.left = `${Math.max(0, Math.min(ev.clientX - wb.left + 12, wb.width - tip.offsetWidth - 4))}px`;
+      tip.style.top = `${ev.clientY - wb.top + 12}px`;
+    };
+    svg.onmouseleave = () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); };
+  }
+
+  // ------------------------------------------------------------ ao vivo
+  const CELL = 8;           // px por célula
+  const canvas = document.getElementById("heat");
+  const ctx = canvas.getContext("2d");
+  const heatTip = document.getElementById("heat-tip");
+  let last = null;
+
+  // Matriz 32×64 → desenho físico: cabeceira no alto (coluna 63 em cima),
+  // setores 1-4 (linhas 0-15, lado direito) à esquerda, 8-5 à direita, como no esquema do cabo.
+  const toScreen = (row, col) => ({ x: row * CELL, y: (63 - col) * CELL });
+  const fromScreen = (x, y) => ({ row: Math.floor(x / CELL), col: 63 - Math.floor(y / CELL) });
+  const sectorOf = (row, col) => {
+    const right = row < 16;
+    const band = 3 - Math.floor(col / 16); // 0 = cabeceira
+    return LAYOUT[band][right ? 0 : 1];
+  };
+
+  function seqColor(t) {
+    const stops = [0, 1, 2, 3, 4, 5, 6].map(i => css(`--seq-${i}`));
+    const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+    return stops[Math.round(x)];
+  }
+
+  function drawHeat(data) {
+    ctx.fillStyle = css("--surface-1");
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const mass = data.cell_mass_g, out = data.out_of_calibration;
+    for (let r = 0; r < 32; r++) {
+      for (let c = 0; c < 64; c++) {
+        const g = mass[r][c];
+        if (g <= 0) continue;
+        const { x, y } = toScreen(r, c);
+        ctx.fillStyle = seqColor(g / massMaxG);
+        ctx.fillRect(x, y, CELL - 1, CELL - 1);
+        if (out[r][c]) {
+          ctx.strokeStyle = css("--critical");
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x + 1, y + 1, CELL - 3, CELL - 3);
+        }
+      }
+    }
+    ctx.strokeStyle = css("--axis");
+    ctx.lineWidth = 1;
+    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    LAYOUT.forEach(([right, left], band) => {
+      [[right, 0], [left, 1]].forEach(([sector, side]) => {
+        const x = side * 16 * CELL, y = band * 16 * CELL;
+        ctx.strokeRect(x + 0.5, y + 0.5, 16 * CELL - 1, 16 * CELL - 1);
+        const active = data.active_blocks.includes(sector);
+        ctx.fillStyle = active ? css("--text-secondary") : css("--text-muted");
+        ctx.fillText(String(sector), x + 8 * CELL, y + 8 * CELL + 4);
+      });
+    });
+  }
+
+  function drawSectors(data) {
+    const by = Object.fromEntries(data.sectors.map(s => [s.sector, s]));
+    document.getElementById("sectors").innerHTML = LAYOUT.flat().map(id => {
+      const s = by[id];
+      const warn = s.cells_out_of_calibration
+        ? `<div class="warn"><b>⚠ fora da faixa:</b> ${s.cells_out_of_calibration} célula(s)</div>` : "";
+      return `<div class="tile${s.active ? "" : " off"}">
+        <div class="name">Setor ${id} · ${SECTOR_NAMES[id]}${s.active ? "" : " · fora da medição"}</div>
+        <div class="mass">${massText(s.mass_kg)}</div>
+        <div class="meta">local ${massText(s.local_mass_kg ?? s.mass_kg)} × α ${fmt(s.gain ?? 1, 3)}</div>
+        <div class="meta">Σ RAW ${fmt(s.raw_sum, 1)} · ${s.active_cells} células · máx ${fmt(s.max_raw, 1)}</div>
+        ${warn}</div>`;
+    }).join("");
+  }
+
+  function qualityReasons(q) {
+    const reasons = [];
+    if (q.TARE_OK === false) reasons.push("sem tara");
+    if (q.BASELINE_OK === false) reasons.push("tara ruidosa");
+    if (q.SIGNAL_STABLE === false) reasons.push("sinal ainda não estável");
+    if (q.MOVEMENT) reasons.push("movimento");
+    if (q.SATURATION) reasons.push("célula saturada");
+    if (q.MISSING_CELLS) reasons.push("manta desconectada");
+    if (q.OUT_OF_CALIBRATION) reasons.push("célula acima da faixa calibrada");
+    if (q.MODEL_VALID === false) reasons.push("sem estimativa do modelo");
+    return reasons;
+  }
+
+  function drawStatus(data) {
+    document.getElementById("total").textContent = massText(data.total_mass_kg);
+    const st = STATE_TEXT[data.weight_status] || data.weight_status;
+    const pct = data.weight_status === "STABILIZING" ? ` · ${fmt(data.stable_progress_pct)}%` : "";
+    document.getElementById("state").textContent = st + pct;
+    const reasons = qualityReasons(data.measurement_quality || {});
+    document.getElementById("valid").innerHTML = data.weight_kg != null
+      ? `<span style="color:var(--good)">●</span> ${massText(data.weight_kg)}`
+      : `não validado<span class="small"> · ${reasons.join(", ") || "sem carga"}</span>`;
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch("/api/v1/calibration/extraction", { cache: "no-store" });
+      if (!r.ok) throw new Error(`extração: HTTP ${r.status}`);
+      last = await r.json();
+      drawHeat(last); drawSectors(last); drawStatus(last); drawGainLive();
+      document.getElementById("live-error").textContent = "";
+    } catch (e) {
+      document.getElementById("live-error").textContent = `Sem leitura do edge-service: ${e.message}`;
+    } finally {
+      setTimeout(poll, 500);
+    }
+  }
+
+  canvas.addEventListener("mousemove", ev => {
+    if (!last) return;
+    const box = canvas.getBoundingClientRect();
+    const x = (ev.clientX - box.left) * (canvas.width / box.width), y = (ev.clientY - box.top) * (canvas.height / box.height);
+    const { row, col } = fromScreen(x, y);
+    if (row < 0 || row > 31 || col < 0 || col > 63) { heatTip.style.display = "none"; return; }
+    const g = last.cell_mass_g[row][col], raw = last.corrected_raw[row][col];
+    heatTip.innerHTML = `<b>Setor ${sectorOf(row, col)}</b> · célula ${row}x${col}<br>` +
+      `RAW ${fmt(raw, 1)} → ${fmt(g, 1)} g (massa local)${last.out_of_calibration[row][col] ? "<br>acima da faixa calibrada" : ""}`;
+    heatTip.style.display = "block";
+    const wb = document.getElementById("heat-wrap").getBoundingClientRect();
+    heatTip.style.left = `${ev.clientX - wb.left + 12}px`;
+    heatTip.style.top = `${ev.clientY - wb.top + 12}px`;
+  });
+  canvas.addEventListener("mouseleave", () => { heatTip.style.display = "none"; });
+
+  // ------------------------------------------------- comparação de modelos
+  let cmp = null;
+  const records = [];
+  const realInput = document.getElementById("real-kg");
+  const realKg = () => { const v = parseFloat(String(realInput.value).replace(",", ".")); return v > 0 ? v : null; };
+  const signed = (kg) => `${kg >= 0 ? "+" : "−"}${massText(Math.abs(kg))}`;
+
+  document.querySelectorAll("#cmp-mode button").forEach(b =>
+    b.addEventListener("click", () => { cmpMode = b.dataset.mode; pressSeg("cmp-mode", "mode", cmpMode); drawCmp(); drawRecords(); }));
+  pressSeg("cmp-mode", "mode", cmpMode);
+  realInput.addEventListener("input", drawCmp);
+
+  function drawCmp() {
+    if (!cmp) return;
+    const rows = cmp.models[cmpMode];
+    const ref = rows.find(r => r.model === ACTIVE_MODEL && r.available);
+    const real = realKg();
+    const sectorIds = [1, 2, 3, 4, 5, 6, 7, 8];
+    const body = rows.map((r, i) => {
+      const name = `<span class="name"><i class="sw" style="background:var(${slot(i)})"></i>${r.label}` +
+        `${r.model === ACTIVE_MODEL && cmpMode === "sector" ? " · em vigor" : ""}</span>`;
+      if (!r.available) return `<tr><td>${name}</td><td colspan="${3 + sectorIds.length}" style="text-align:left" class="small">indisponível: ${r.error || "—"}</td></tr>`;
+      const diff = ref ? r.total_mass_kg - ref.total_mass_kg : null;
+      const err = real != null ? r.total_mass_kg - real : null;
+      return `<tr class="${r.model === ACTIVE_MODEL && cmpMode === "sector" ? "hl" : ""}"><td>${name}</td>` +
+        `<td><b>${massText(r.total_mass_kg)}</b></td>` +
+        `<td>${diff == null || r.model === ACTIVE_MODEL ? "—" : signed(diff)}</td>` +
+        `<td>${err == null ? "—" : `${signed(err)} (${fmt(err / real * 100, 1)}%)`}</td>` +
+        sectorIds.map(s => `<td>${cmp.active_blocks.includes(s) ? massText(r.sectors_kg[String(s)]) : "—"}</td>`).join("") + "</tr>";
+    }).join("");
+    document.getElementById("cmp-table").innerHTML =
+      `<tr><th>Modelo</th><th>Massa total</th><th>Δ vs PCHIP</th><th>Erro vs peso real</th>` +
+      sectorIds.map(s => `<th>Setor ${s}</th>`).join("") + `</tr>${body}`;
+    const st = STATE_TEXT[cmp.weight_status] || cmp.weight_status;
+    const pct = cmp.weight_status === "STABILIZING" ? ` ${fmt(cmp.stable_progress_pct)}%` : "";
+    document.getElementById("cmp-state").textContent = `Estado: ${st}${pct} · janela de estabilidade, atualizada a cada segundo`;
+  }
+
+  async function pollCmp() {
+    try {
+      const r = await fetch("/api/v1/calibration/compare", { cache: "no-store" });
+      if (!r.ok) throw new Error(`comparação: HTTP ${r.status}`);
+      cmp = await r.json();
+      drawCmp();
+      document.getElementById("cmp-error").textContent = "";
+    } catch (e) {
+      document.getElementById("cmp-error").textContent = `Sem comparação: ${e.message}`;
+    } finally {
+      setTimeout(pollCmp, 1000);
+    }
+  }
+
+  document.getElementById("record").addEventListener("click", () => {
+    const real = realKg();
+    if (!cmp) return;
+    if (real == null) { document.getElementById("cmp-error").textContent = "Informe o peso real antes de registrar."; realInput.focus(); return; }
+    records.push({ time: new Date().toLocaleTimeString("pt-BR"), real, status: cmp.weight_status,
+                   models: JSON.parse(JSON.stringify(cmp.models)) });
+    document.getElementById("cmp-error").textContent = "";
+    drawRecords();
+  });
+  document.getElementById("rec-clear").addEventListener("click", () => { records.length = 0; drawRecords(); });
+  document.getElementById("rec-csv").addEventListener("click", () => {
+    const lines = ["horario;peso_real_kg;estado;ajuste;modelo;massa_kg;erro_kg"];
+    for (const rec of records) for (const mode of ["sector", "global"]) for (const m of rec.models[mode]) {
+      if (!m.available) continue;
+      lines.push([rec.time, rec.real, rec.status, mode, m.model, m.total_mass_kg, (m.total_mass_kg - rec.real).toFixed(4)].join(";"));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `comparacao_modelos_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function drawRecords() {
+    const has = records.length > 0;
+    document.getElementById("rec-empty").hidden = has;
+    document.getElementById("rec-details").hidden = !has;
+    document.getElementById("rec-csv").disabled = !has;
+    document.getElementById("rec-clear").disabled = !has;
+    if (!has) { document.getElementById("rec-summary").innerHTML = ""; return; }
+    const models = records[0].models[cmpMode];
+    const summary = models.map((m, i) => {
+      const pairs = records.map(rec => [rec.models[cmpMode][i], rec.real]).filter(([x]) => x.available);
+      if (!pairs.length) return "";
+      const errs = pairs.map(([x, real]) => x.total_mass_kg - real);
+      const rmse = Math.sqrt(errs.reduce((a, e) => a + e * e, 0) / errs.length);
+      const bias = errs.reduce((a, e) => a + e, 0) / errs.length;
+      const mape = pairs.reduce((a, [, real], k) => a + Math.abs(errs[k]) / real, 0) / errs.length * 100;
+      const worst = Math.max(...errs.map(Math.abs));
+      return `<tr class="${m.model === ACTIVE_MODEL && cmpMode === "sector" ? "hl" : ""}">` +
+        `<td><span class="name"><i class="sw" style="background:var(${slot(i)})"></i>${m.label}</span></td>` +
+        `<td>${massText(rmse)}</td><td>${signed(bias)}</td><td>${fmt(mape, 1)}%</td><td>${massText(worst)}</td></tr>`;
+    }).join("");
+    document.getElementById("rec-summary").innerHTML =
+      `<tr><th>Modelo (${cmpMode === "sector" ? "ajuste por setor" : "ajuste global"})</th><th>RMSE</th><th>Viés médio</th><th>Erro médio %</th><th>Maior erro</th></tr>${summary}` +
+      `<tr><td colspan="5" class="small" style="text-align:left">${records.length} leitura(s). Com poucas leituras, diferenças pequenas entre modelos não querem dizer nada.</td></tr>`;
+    const head = models.map(m => `<th>${m.label}</th>`).join("");
+    const rows = records.map(rec => `<tr><td>${rec.time}</td><td>${massText(rec.real)}</td><td>${STATE_TEXT[rec.status] || rec.status}</td>` +
+      rec.models[cmpMode].map(m => `<td>${m.available ? massText(m.total_mass_kg) : "—"}</td>`).join("") + "</tr>").join("");
+    document.getElementById("rec-table").innerHTML = `<tr><th>Horário</th><th>Peso real</th><th>Estado</th>${head}</tr>${rows}`;
+  }
+
+  // ------------------------------------------------------ ajuste de ganho α
+  const G = (id) => document.getElementById(id);
+  const STABLE = new Set(["NOT_VALIDATED", "VALID"]);
+  let gain = null;          // GET /calibration/gain
+  let preview = null;       // POST /calibration/gain/fit (com a lista de pontos usada)
+  let gainMode = "global";
+  let tareInfo = null;      // GET /calibration/tare
+  let busy = false;
+  const pointsKey = () => (gain?.points || []).map(p => p.id).join(",");
+  const gainKg = () => { const v = parseFloat(String(G("gain-kg").value).replace(",", ".")); return v > 0 ? v : null; };
+  const timeText = (iso) => iso ? new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—";
+  const dateText = (iso) => iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+
+  async function api(method, url, body) {
+    const r = await fetch(url, { method, cache: "no-store",
+      headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    let data = null;
+    try { data = await r.json(); } catch { /* resposta sem corpo */ }
+    if (!r.ok) {
+      const d = data && data.detail;
+      throw new Error(typeof d === "string" ? d : d ? "dados inválidos" : `HTTP ${r.status}`);
+    }
+    return data;
+  }
+  function say(id, text, ok = true) {
+    const e = G(id);
+    e.textContent = text || "";
+    e.className = text ? `small ${ok ? "ok-msg" : "err"}` : "small";
+  }
+  function pill(id, cls, text) { const e = G(id); e.className = `pill ${cls}`; e.textContent = text; }
+  function confirmBox(id, show) { G(id).hidden = !show; }
+
+  async function loadGain() {
+    gain = await api("GET", "/api/v1/calibration/gain");
+    if (preview && preview.key !== pointsKey()) preview = null;
+    drawGainStatus(); drawPoints(); drawPreview(); drawGainLive();
+  }
+  async function loadTare() {
+    tareInfo = await api("GET", "/api/v1/calibration/tare");
+    drawGainLive();
+  }
+
+  function drawGainStatus() {
+    if (!gain) return;
+    const g = gain.gains, ids = Object.keys(g).sort();
+    const same = ids.every(s => Math.abs(g[s] - g[ids[0]]) < 1e-9);
+    const alphas = same ? `α = ${fmt(g[ids[0]], 3)} em todos os setores` : ids.map(s => `S${s} ${fmt(g[s], 3)}`).join(" · ");
+    const parts = [`<span>Ganhos em vigor: <b>${alphas}</b></span>`];
+    if (gain.calibrated && gain.fit) {
+      const f = gain.fit, loo = f.leave_one_out;
+      parts.push(`<span>ajustados em <b>${dateText(f.fitted_at)}</b> · ${f.mode === "setor" ? "um α por setor" : "um α para a manta"} · ${f.points} pontos` +
+        `${loo ? ` · erro deixando um de fora <b>${massText(loo.rmse_kg)}</b>` : ""}</span>`);
+      if (!gain.fit_matches_curves) parts.push(`<span class="err">As curvas mudaram depois deste ajuste: calcule e aplique de novo.</span>`);
+    } else {
+      parts.push(`<span>não calibrados (soma simples das massas locais)</span>`);
+    }
+    G("gain-status").innerHTML = parts.join("");
+    G("step-fit").classList.toggle("done", !!gain.calibrated);
+    pill("fit-pill", gain.calibrated ? "ok" : "idle", gain.calibrated ? "ganhos aplicados" : "α = 1");
+  }
+
+  // Passos 1 e 2: estado ao vivo, a cada leitura da extração
+  function drawGainLive() {
+    const data = last;
+    const status = data ? data.weight_status : null;
+    const loadKg = data ? data.total_mass_kg : 0;
+
+    // Tara
+    const collecting = !!(tareInfo && tareInfo.collecting) || !!(data && data.tare_in_progress);
+    const rec = tareInfo && tareInfo.record;
+    if (collecting) pill("tare-pill", "wait", "coletando a tara…");
+    else if (!rec) pill("tare-pill", "bad", "sem tara");
+    else pill("tare-pill", tareInfo.baseline_ok ? "ok" : "bad", tareInfo.baseline_ok ? `tara das ${timeText(rec.timestamp_tare)}` : "tara ruidosa");
+    G("step-tare").classList.toggle("done", !!rec && !collecting);
+    G("tare-info").textContent = !data ? "" : status === "NO_LOAD" ? "Maca vazia." : `Há ${massText(loadKg)} sobre a maca.`;
+    G("gain-tare").disabled = collecting || busy;
+
+    // Leitura para registrar
+    const st = status ? (STATE_TEXT[status] || status) : "sem leitura";
+    const cls = !status ? "idle" : STABLE.has(status) ? "ok" : status === "MOVEMENT" ? "bad" : status === "NO_LOAD" ? "idle" : "wait";
+    pill("cap-pill", cls, st);
+    const pct = !status ? 0 : STABLE.has(status) ? 100 : status === "STABILIZING" ? (data.stable_progress_pct || 0) : 0;
+    G("cap-progress").style.width = `${pct}%`;
+    let live = data ? `Estimado agora: ${massText(loadKg)}` : "—";
+    const out = data ? data.sectors.filter(s => s.active && s.cells_out_of_calibration > 0) : [];
+    if (out.length) live += ` · ▲ ${out.reduce((a, s) => a + s.cells_out_of_calibration, 0)} célula(s) acima da faixa nos setores ${out.map(s => s.sector).join(", ")}: espalhe mais a carga`;
+    G("cap-live").textContent = live;
+
+    let hint = "";
+    if (!rec) hint = "Faça a tara (passo 1) antes de registrar.";
+    else if (!status || status === "NO_LOAD") hint = "Ponha a carga sobre a maca.";
+    else if (!STABLE.has(status)) hint = `Espere o estado ficar Estável${status === "STABILIZING" ? ` (${fmt(pct)}%)` : ""}.`;
+    else if (gainKg() == null) hint = "Informe o peso real em kg.";
+    G("cap-hint").textContent = hint;
+    G("gain-register").disabled = busy || !!hint || collecting;
+  }
+
+  G("gain-kg").addEventListener("input", drawGainLive);
+
+  G("gain-tare").addEventListener("click", () => {
+    if (last && last.weight_status !== "NO_LOAD") {
+      G("tare-confirm-text").textContent = `A maca está com ${massText(last.total_mass_kg)} em cima. Essa carga vira o novo zero.`;
+      confirmBox("tare-confirm", true);
+      return;
+    }
+    doTare();
+  });
+  G("tare-confirm-no").addEventListener("click", () => confirmBox("tare-confirm", false));
+  G("tare-confirm-yes").addEventListener("click", () => { confirmBox("tare-confirm", false); doTare(); });
+
+  async function doTare() {
+    busy = true; drawGainLive();
+    try {
+      tareInfo = (await api("POST", "/api/v1/calibration/tare", {})).tare;
+      say("tare-msg", "Tara iniciada. Não encoste na maca por alguns segundos.");
+      tareInfo = { ...tareInfo, collecting: true };
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        tareInfo = await api("GET", "/api/v1/calibration/tare");
+        drawGainLive();
+        if (!tareInfo.collecting) break;
+      }
+      const rec = tareInfo.record;
+      if (tareInfo.collecting) say("tare-msg", "A tara ainda não terminou. Confira se a manta está conectada.", false);
+      else say("tare-msg", `Tara feita: ${rec.n_frames} frames, ruído médio ${fmt(rec.baseline_std, 3)} RAW.`, tareInfo.baseline_ok);
+      await loadGain();
+    } catch (e) {
+      say("tare-msg", `Não foi possível fazer a tara: ${e.message}`, false);
+    } finally {
+      busy = false; drawGainLive();
+    }
+  }
+
+  G("gain-register").addEventListener("click", async () => {
+    const kg = gainKg();
+    if (kg == null) return;
+    busy = true; drawGainLive();
+    try {
+      gain = await api("POST", "/api/v1/calibration/gain/points", { known_mass_kg: kg, note: G("gain-note").value || null });
+      const p = gain.points[gain.points.length - 1];
+      say("cap-msg", `Ponto ${gain.points.length} registrado: ${massText(p.known_mass_kg)} reais, soma das curvas ${massText(p.local_total_kg)} (${p.frames} frames em ${fmt(p.seconds, 1)} s).`);
+      if (preview) preview = null;
+      drawGainStatus(); drawPoints(); drawPreview();
+    } catch (e) {
+      say("cap-msg", e.message, false);
+    } finally {
+      busy = false; drawGainLive();
+    }
+  });
+
+  // Passo 3: pontos
+  function drawPoints() {
+    const pts = gain ? gain.points : [];
+    G("pts-empty").hidden = pts.length > 0;
+    G("pts-clear").disabled = pts.length === 0;
+    G("gain-calc").disabled = pts.length < 2;
+    pill("pts-pill", pts.length >= 2 ? "ok" : pts.length ? "wait" : "idle", `${pts.length} ponto${pts.length === 1 ? "" : "s"}`);
+    G("step-points").classList.toggle("done", pts.length >= 2);
+    G("step-capture").classList.toggle("done", pts.length >= 2);
+    G("gain-mode-hint").textContent = pts.length < 2
+      ? "Registre pelo menos 2 pontos para calcular."
+      : gainMode === "setor"
+        ? `Um α por setor precisa de cargas em posições diferentes; com ${pts.length} pontos para ${gain.active_blocks.length} setores, cada α é puxado para o α da manta (λ maior puxa mais).`
+        : "Um α para a manta inteira: o mais seguro com poucos pontos ou carga sempre no mesmo lugar.";
+    if (!pts.length) { G("pts-table").innerHTML = ""; return; }
+    const rows = pts.map((p, i) => {
+      const err = p.current_error_kg;
+      return `<tr><td>${i + 1}</td><td>${timeText(p.created_at)}</td><td style="text-align:left">${p.note ? p.note.replace(/</g, "&lt;") : "—"}</td>` +
+        `<td><b>${massText(p.known_mass_kg)}</b></td><td>${massText(p.local_total_kg)}</td><td>${massText(p.current_estimate_kg)}</td>` +
+        `<td>${signed(err)} (${fmt(err / p.known_mass_kg * 100, 1)}%)</td>` +
+        `<td>${p.cells_out_of_calibration ? `<span class="err">▲ ${p.cells_out_of_calibration}</span>` : "0"}</td>` +
+        `<td>${p.tare_id === gain.tare_id ? "atual" : "anterior"}</td>` +
+        `<td><button type="button" class="action link" data-del="${p.id}" aria-label="Apagar o ponto ${i + 1}">Apagar</button></td></tr>`;
+    }).join("");
+    G("pts-table").innerHTML = `<tr><th>#</th><th>Hora</th><th style="text-align:left">Posição</th><th>Peso real</th>` +
+      `<th>Soma das curvas (α = 1)</th><th>Com o α em vigor</th><th>Erro com o α em vigor</th><th>Fora da faixa</th><th>Tara</th><th></th></tr>${rows}`;
+    G("pts-table").querySelectorAll("button[data-del]").forEach(b => b.addEventListener("click", async () => {
+      try {
+        gain = await api("DELETE", `/api/v1/calibration/gain/points/${b.dataset.del}`);
+        if (preview) preview = null;
+        say("pts-msg", "Ponto apagado.");
+        drawGainStatus(); drawPoints(); drawPreview();
+      } catch (e) { say("pts-msg", e.message, false); }
+    }));
+  }
+
+  G("pts-clear").addEventListener("click", () => { G("pts-confirm-n").textContent = gain ? gain.points.length : 0; confirmBox("pts-confirm", true); });
+  G("pts-confirm-no").addEventListener("click", () => confirmBox("pts-confirm", false));
+  G("pts-confirm-yes").addEventListener("click", async () => {
+    confirmBox("pts-confirm", false);
+    try {
+      gain = await api("DELETE", "/api/v1/calibration/gain/points");
+      preview = null;
+      say("pts-msg", "Pontos apagados.");
+      drawGainStatus(); drawPoints(); drawPreview();
+    } catch (e) { say("pts-msg", e.message, false); }
+  });
+
+  // Passo 4: calcular, aplicar, voltar para 1
+  document.querySelectorAll("#gain-mode button").forEach(b => b.addEventListener("click", () => {
+    gainMode = b.dataset.mode; preview = null;
+    pressSeg("gain-mode", "mode", gainMode);
+    G("gain-lam-field").hidden = gainMode !== "setor";
+    drawPoints(); drawPreview();
+  }));
+  pressSeg("gain-mode", "mode", gainMode);
+  G("gain-lam").addEventListener("input", () => { preview = null; drawPreview(); });
+  const lam = () => { const v = parseFloat(String(G("gain-lam").value).replace(",", ".")); return v >= 0 ? v : 1; };
+
+  G("gain-calc").addEventListener("click", async () => {
+    try {
+      const res = await api("POST", "/api/v1/calibration/gain/fit", { mode: gainMode, lam: lam() });
+      preview = { ...res, key: pointsKey() };
+      say("fit-msg", "");
+      drawPreview();
+    } catch (e) { say("fit-msg", e.message, false); }
+  });
+
+  G("gain-apply").addEventListener("click", async () => {
+    if (!preview) return;
+    G("gain-apply").disabled = true;
+    try {
+      gain = await api("POST", "/api/v1/calibration/gain/apply", { mode: preview.mode, lam: preview.lam ?? lam() });
+      preview = null;
+      say("fit-msg", "Ganhos aplicados e gravados em block_curves.json. A massa ao vivo já usa os novos α.");
+      await fetchCurves(); render();
+      drawGainStatus(); drawPoints(); drawPreview();
+    } catch (e) { say("fit-msg", e.message, false); drawPreview(); }
+  });
+
+  G("gain-reset").addEventListener("click", () => confirmBox("reset-confirm", true));
+  G("reset-confirm-no").addEventListener("click", () => confirmBox("reset-confirm", false));
+  G("reset-confirm-yes").addEventListener("click", async () => {
+    confirmBox("reset-confirm", false);
+    try {
+      gain = await api("POST", "/api/v1/calibration/gain/reset");
+      preview = null;
+      say("fit-msg", "Ganhos de volta para α = 1.");
+      await fetchCurves(); render();
+      drawGainStatus(); drawPoints(); drawPreview();
+    } catch (e) { say("fit-msg", e.message, false); }
+  });
+
+  function drawPreview() {
+    const ok = !!preview && preview.key === pointsKey();
+    G("fit-result").hidden = !ok;
+    G("gain-apply").disabled = !ok;
+    if (!ok) return;
+    const rep = preview.report;
+    const tile = (k, s, main, note) => s ? `<div class="metric${main ? " main" : ""}"><div class="k">${k}</div>` +
+      `<div class="v">${massText(s.rmse_kg)}</div><div class="s">viés ${signed(s.bias_kg)} · ${fmt(s.mape_pct, 1)}%</div>` +
+      `${note ? `<div class="s">${note}</div>` : ""}</div>` : "";
+    G("fit-metrics").innerHTML =
+      tile("Sem ganho (α = 1)", rep.without_gain) +
+      tile("Ajustado", rep.fitted, false, "nos próprios pontos") +
+      tile("Deixando um de fora", rep.leave_one_out, true, "o número que vale");
+    const cur = preview.current_gains;
+    G("fit-alpha").innerHTML = `<tr><th>Setor</th><th>α em vigor</th><th>α novo</th><th>Variação</th></tr>` +
+      Object.keys(preview.alpha).sort().map((s, i) => {
+        const a = preview.alpha[s], c = cur[s];
+        const off = gain && !gain.active_blocks.includes(Number(s));
+        return `<tr><td><span class="name"><i class="sw" style="background:var(${slot(i)})"></i>Setor ${s}${off ? " (fora da medição)" : ""}</span></td>` +
+          `<td>${fmt(c, 3)}</td><td><b>${fmt(a, 3)}</b></td><td>${a >= c ? "+" : "−"}${fmt(Math.abs(a / c - 1) * 100, 1)}%</td></tr>`;
+      }).join("") +
+      `<tr><td colspan="4" class="small" style="text-align:left">α da manta inteira: ${fmt(preview.alpha_global, 3)}${preview.mode === "setor" ? ` · λ = ${fmt(preview.lam, 2)}` : ""}</td></tr>`;
+    const warns = [...preview.warnings];
+    if (rep.leave_one_out && rep.leave_one_out.rmse_kg > rep.without_gain.rmse_kg)
+      warns.push("Deixando um de fora, o erro fica maior que sem ganho: não aplique, registre mais pontos ou use um α para a manta.");
+    G("fit-warnings").innerHTML = warns.map(w => `<li>${w}</li>`).join("");
+    pill("fit-pill", "wait", "calculado, não aplicado");
+    drawFitChart();
+  }
+
+  // Massa estimada × peso real: antes (α = 1) e depois do ajuste, com a diagonal do acerto
+  function drawFitChart() {
+    const svg = G("fit-chart");
+    const W = 640, H = 380, m = { l: 60, r: 16, t: 12, b: 40 };
+    const pts = preview.points;
+    const before = css("--series-2"), after = css("--series-1");
+    G("fit-legend").innerHTML =
+      `<span><i class="sw hollow" style="border-color:${before}"></i>sem ganho (α = 1)</span>` +
+      `<span><i class="sw" style="background:${after}"></i>com o α novo</span>` +
+      `<span><i class="sw line" style="background:${css("--axis")}"></i>acerto exato</span>`;
+    const maxV = Math.max(...pts.flatMap(p => [p.known_mass_kg, p.without_gain_kg, p.fitted_kg]));
+    const rough = maxV * 1.08 / 5, mag = 10 ** Math.floor(Math.log10(rough || 1));
+    const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(s => s >= rough) || mag * 10;
+    const top = Math.ceil(maxV * 1.08 / step) * step;
+    const X = v => m.l + (v / top) * (W - m.l - m.r);
+    const Y = v => H - m.b - (v / top) * (H - m.t - m.b);
+    const ns = "http://www.w3.org/2000/svg";
+    const el = (tag, attrs, text) => {
+      const e = document.createElementNS(ns, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+      if (text != null) e.textContent = text;
+      svg.appendChild(e);
+      return e;
+    };
+    svg.innerHTML = "";
+    for (let v = 0; v <= top + 1e-9; v += step) {
+      el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: css("--grid") });
+      el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, fmt(v, step < 1 ? 1 : 0));
+      el("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, fmt(v, step < 1 ? 1 : 0));
+    }
+    el("line", { x1: X(0), y1: Y(0), x2: X(top), y2: Y(top), stroke: css("--axis"), "stroke-dasharray": "4 4" });
+    el("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }, "Peso real (kg)");
+    el("text", { x: 12, y: (m.t + H - m.b) / 2, "text-anchor": "middle", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` }, "Massa estimada (kg)");
+    pts.forEach((p, i) => {
+      el("line", { x1: X(p.known_mass_kg), x2: X(p.known_mass_kg), y1: Y(p.without_gain_kg), y2: Y(p.fitted_kg), stroke: css("--grid"), "stroke-width": 2 });
+      const a = el("circle", { cx: X(p.known_mass_kg), cy: Y(p.without_gain_kg), r: 5, fill: css("--surface-1"), stroke: before, "stroke-width": 2 });
+      a.appendChild(Object.assign(document.createElementNS(ns, "title"), { textContent: `Ponto ${i + 1}: real ${massText(p.known_mass_kg)} · sem ganho ${massText(p.without_gain_kg)}` }));
+      const b = el("circle", { cx: X(p.known_mass_kg), cy: Y(p.fitted_kg), r: 5, fill: after, stroke: css("--surface-1"), "stroke-width": 2 });
+      b.appendChild(Object.assign(document.createElementNS(ns, "title"), { textContent:
+        `Ponto ${i + 1}: real ${massText(p.known_mass_kg)} · com o α novo ${massText(p.fitted_kg)}` +
+        `${p.leave_one_out_kg != null ? ` · deixando este ponto de fora ${massText(p.leave_one_out_kg)}` : ""}` }));
+    });
+  }
+
+  loadCurves().catch(e => { document.getElementById("curve-lead").innerHTML = `<span class="err">${e.message}</span>`; })
+    .finally(() => { poll(); pollCmp(); });
+  Promise.all([loadGain(), loadTare()]).catch(e => { G("gain-status").innerHTML = `<span class="err">Ganhos: ${e.message}</span>`; });
+})();
+</script>
+</body>
+</html>

@@ -41,6 +41,10 @@ class MLWeightPredictor:
     def metadata(self) -> dict[str, Any]:
         return self._meta
 
+    @property
+    def model_path(self) -> Path:
+        return self._model_path
+
     def load(self) -> bool:
         """Carrega o modelo joblib e metadados se existirem no disco."""
         if not self._model_path.exists():
