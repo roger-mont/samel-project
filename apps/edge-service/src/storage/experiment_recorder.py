@@ -12,12 +12,18 @@ Cada sessão vira uma pasta em data/experiments/<session_id>/:
 Com o raw.u8 e o baseline dá para refazer a cadeia RAW → filtrado → corrigido →
 features → estimativa com outro modelo. iter_cell_records() devolve o formato
 longo do item 15, uma linha por célula.
+
+Nos ensaios de célula (orientações de 15/10, item 5), o marcador também guarda a
+célula ensaiada (target_cell, "linha x coluna" como nas pastas de docs/) e o setor
+dela (target_block), para exportar por cell_id, block_id, cycle_id e direction com
+scripts/exportar_ensaios_celula.py.
 """
 from __future__ import annotations
 
 import csv
 import json
 import logging
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -28,6 +34,7 @@ from typing import Any, Iterator
 import numpy as np
 
 from core.settings import HID_COLS, HID_ROWS
+from storage.calibration_store import BLOCK_REGIONS
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +68,30 @@ FRAME_FIELDS = [
     "estimated_mass",
     "prediction_valid",
     "weight_status",
+    "target_cell",
+    "target_block",
 ]
 
 LOADING_DIRECTIONS = ("UP", "DOWN", "UNKNOWN")
+_CELL_RE = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$")
+
+
+def parse_cell(text: str) -> tuple[int, int]:
+    """'12x34' → (12, 34): linha (0-31) e coluna (0-63) da matriz."""
+    m = _CELL_RE.match(text or "")
+    if not m:
+        raise ValueError("célula deve ser 'linha x coluna', ex.: 12x34")
+    row, col = int(m.group(1)), int(m.group(2))
+    if not (0 <= row < HID_ROWS and 0 <= col < HID_COLS):
+        raise ValueError(f"célula {row}x{col} fora da matriz {HID_ROWS}x{HID_COLS}")
+    return row, col
+
+
+def block_of(row: int, col: int) -> int:
+    for bid, (rs, cs) in BLOCK_REGIONS.items():
+        if rs.start <= row < rs.stop and cs.start <= col < cs.stop:
+            return bid
+    raise ValueError(f"célula {row}x{col} fora dos setores")
 
 
 @dataclass
@@ -73,6 +101,8 @@ class ExperimentMarker:
     cycle_id: int | None = None
     known_mass_g: float | None = None
     loading_direction: str = "UNKNOWN"
+    target_cell: str | None = None     # célula ensaiada, "linha x coluna"
+    target_block: int | None = None
 
 
 @dataclass
@@ -110,6 +140,8 @@ class ExperimentRecorder:
                 "cycle_id": s.marker.cycle_id,
                 "known_mass_g": s.marker.known_mass_g,
                 "loading_direction": s.marker.loading_direction,
+                "target_cell": s.marker.target_cell,
+                "target_block": s.marker.target_block,
             }
 
     def start(self, meta: dict[str, Any]) -> dict[str, Any]:
@@ -141,7 +173,12 @@ class ExperimentRecorder:
         cycle_id: int | None = None,
         known_mass_g: float | None = None,
         loading_direction: str | None = None,
+        target_cell: str | None = None,
     ) -> dict[str, Any]:
+        """Muda os rótulos a partir do próximo frame. target_cell="" limpa a célula ensaiada."""
+        cell: tuple[int, int] | None = None
+        if target_cell:
+            cell = parse_cell(target_cell)
         with self._lock:
             if self._session is None:
                 raise RuntimeError("Nenhuma sessão de experimento ativa")
@@ -155,6 +192,9 @@ class ExperimentRecorder:
                 if direction not in LOADING_DIRECTIONS:
                     raise ValueError(f"loading_direction deve ser um de {LOADING_DIRECTIONS}")
                 m.loading_direction = direction
+            if target_cell is not None:
+                m.target_cell = f"{cell[0]}x{cell[1]}" if cell else None
+                m.target_block = block_of(*cell) if cell else None
         return self.status()
 
     def stop(self) -> dict[str, Any]:
@@ -202,6 +242,8 @@ class ExperimentRecorder:
                 cycle_id=s.marker.cycle_id,
                 known_mass_g=s.marker.known_mass_g,
                 loading_direction=s.marker.loading_direction,
+                target_cell=s.marker.target_cell,
+                target_block=s.marker.target_block,
             )
             s.writer.writerow(row)
             s.frames += 1

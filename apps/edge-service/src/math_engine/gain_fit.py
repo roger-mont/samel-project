@@ -7,6 +7,10 @@ e pelo painel de ajuste de ganho da página /calibracao (pontos registrados ao v
 Modos:
 - "global": um α para a manta inteira, mínimos quadrados sobre a soma local;
 - "setor":  um α por setor, puxado para o α global (ridge, λ adimensional).
+
+As orientações de 15/10 (item 3.9) pedem α = 1 até os ensaios de carga distribuída
+e de posição; o α ajustado antes disso é provisório. position_report() separa erro
+espacial de erro de ganho (item 7).
 """
 from __future__ import annotations
 
@@ -69,6 +73,61 @@ def fit_report(L: np.ndarray, M: np.ndarray, alpha: np.ndarray, mode: str, lam: 
         "fitted": _stats(L @ alpha - M, M),
         "leave_one_out": _stats(loo_err, loo_M) if len(loo_err) else None,
     }
+
+
+POSITIONS = ("centro", "cabeceira", "peseira", "esquerda", "direita")
+
+
+def position_report(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ensaios de carga conhecida e de posição (item 7 das orientações de 15/10).
+
+    Agrupa os pontos pela massa real (0,1 kg) e compara o erro com o α em vigor:
+    - repetibilidade: desvio do erro dentro da mesma posição (ciclos 0 → carga → 0);
+    - espalhamento entre posições: desvio das médias de cada posição;
+    - viés: erro médio do grupo.
+    Se a mesma massa varia muito com a posição, o erro é sobretudo espacial; se todas
+    as posições dão valores parecidos, mas deslocados da referência, é de ganho global.
+    """
+    groups: dict[float, list[dict[str, Any]]] = {}
+    for p in points:
+        groups.setdefault(round(float(p["known_mass_kg"]), 1), []).append(p)
+    report = []
+    for mass, pts in sorted(groups.items()):
+        if len(pts) < 2:
+            continue
+        errors = np.array([p["current_estimate_kg"] - p["known_mass_kg"] for p in pts])
+        by_pos: dict[str, list[float]] = {}
+        for p, e in zip(pts, errors):
+            by_pos.setdefault(p.get("position") or "sem posição", []).append(float(e))
+        positions = {
+            pos: {"n": len(v), "mean_error_kg": round(float(np.mean(v)), 3),
+                  "std_error_kg": round(float(np.std(v, ddof=1)), 3) if len(v) > 1 else None}
+            for pos, v in sorted(by_pos.items())
+        }
+        repeats = [v for v in by_pos.values() if len(v) > 1]
+        repeat_std = (float(np.sqrt(sum(np.var(v, ddof=1) * (len(v) - 1) for v in repeats)
+                                    / sum(len(v) - 1 for v in repeats))) if repeats else None)
+        named = {k: v for k, v in by_pos.items() if k != "sem posição"}
+        spread = float(np.std([np.mean(v) for v in named.values()], ddof=1)) if len(named) > 1 else None
+        bias = float(np.mean(errors))
+        if spread is None:
+            diagnosis = "registre a mesma massa em outras posições"
+        elif spread > max(abs(bias), repeat_std or 0.0):
+            diagnosis = "espacial: a mesma massa muda com a posição"
+        elif abs(bias) > max(spread, repeat_std or 0.0):
+            diagnosis = "ganho global: posições parecidas, deslocadas da referência"
+        else:
+            diagnosis = "inconclusivo: diferenças do tamanho da repetibilidade"
+        report.append({
+            "known_mass_kg": mass,
+            "n": len(pts),
+            "bias_kg": round(bias, 3),
+            "repeatability_std_kg": None if repeat_std is None else round(repeat_std, 3),
+            "position_spread_kg": None if spread is None else round(spread, 3),
+            "positions": positions,
+            "diagnosis": diagnosis,
+        })
+    return report
 
 
 def curves_sha1(data: dict[str, Any]) -> str:

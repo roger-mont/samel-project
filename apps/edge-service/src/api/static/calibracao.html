@@ -139,7 +139,11 @@
     font: inherit; font-size: 13px; width: 220px; max-width: 100%; padding: 3px 6px; border-radius: 6px;
     border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
   }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+  select {
+    font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
 
   /* Ajuste de ganho */
   .gain-steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
@@ -246,10 +250,39 @@
     <p class="small err" id="live-error"></p>
   </section>
 
+  <section class="card wide" id="diag-card">
+    <h2>Diagnóstico da calibração</h2>
+    <p class="lead">Mostra de onde vem o erro antes de qualquer ajuste de α: células fora da curva, baixa sensibilidade (1 RAW vale muitos gramas),
+      trecho sem dados, histerese e massa residual com a maca vazia. Saturação digital é só RAW no limite do conversor.</p>
+    <div class="metrics" id="diag-metrics" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))"></div>
+    <div class="fit-grid" style="margin-top:12px">
+      <div style="min-width:0">
+        <h3 style="font-size:14px;margin:0 0 6px">Massa residual com a maca vazia</h3>
+        <p class="small">Conta só com a maca vazia, depois da tara. Para o ensaio de zero, faça a tara, recomece a contagem e espere 10 minutos sem tocar na maca.</p>
+        <div class="kv" id="residual-kv">—</div>
+        <div class="table-scroll"><table id="residual-table"></table></div>
+        <div class="controls" style="margin-top:8px">
+          <button type="button" class="action" id="residual-reset">Recomeçar a contagem</button>
+          <span class="small" id="residual-msg"></span>
+        </div>
+      </div>
+      <div style="min-width:0">
+        <h3 style="font-size:14px;margin:0 0 6px">Alertas das curvas em vigor</h3>
+        <ul class="warn-list" id="diag-alerts"><li>Carregando…</li></ul>
+      </div>
+    </div>
+    <details id="cells-details">
+      <summary>Células que mais pesam agora</summary>
+      <div class="table-scroll"><table id="cells-table"></table></div>
+    </details>
+    <p class="small err" id="diag-error"></p>
+  </section>
+
   <section class="card wide" id="gain-card">
     <h2>Ajuste de ganho α (massa local → massa total)</h2>
     <p class="lead">Corrige a soma das curvas com cargas de peso conhecido: M = Σ α<sub>s</sub> · L<sub>s</sub>. As curvas por célula não mudam; o α multiplica a massa de cada setor.
       Siga os passos na ordem. Nada é gravado nas curvas até você clicar em <b>Aplicar ganhos</b>.</p>
+    <p class="small">▲ Provisório: pelas orientações de 15/10, o α definitivo só depois dos ensaios de carga distribuída e de posição. Enquanto houver células acima da faixa calibrada, o α também compensa a massa cortada delas.</p>
     <div class="kv" id="gain-status">Carregando os ganhos…</div>
     <ol class="gain-steps">
       <li class="step" id="step-tare">
@@ -274,7 +307,11 @@
         </div>
         <div class="controls">
           <label class="field">Peso real (kg) <input type="number" id="gain-kg" min="0" step="0.01" inputmode="decimal"></label>
-          <label class="field">Posição <input type="text" id="gain-note" maxlength="80" placeholder="ex.: placa no centro" autocomplete="off"></label>
+          <label class="field">Posição <select id="gain-position">
+            <option value="">—</option><option value="centro">centro</option><option value="cabeceira">cabeceira</option>
+            <option value="peseira">peseira</option><option value="esquerda">esquerda</option><option value="direita">direita</option>
+          </select></label>
+          <label class="field">Nota <input type="text" id="gain-note" maxlength="80" placeholder="ex.: placa de 20 kg" autocomplete="off"></label>
           <button type="button" class="action primary" id="gain-register" disabled>Registrar ponto</button>
         </div>
         <p class="small" id="cap-hint"></p>
@@ -285,6 +322,11 @@
         <div class="step-head"><span class="num">3</span><h3>Conferir os pontos</h3><span class="pill idle" id="pts-pill">0 pontos</span></div>
         <p class="small" id="pts-empty">Nenhum ponto registrado. Os pontos ficam gravados no edge-service e continuam lá se você fechar a página.</p>
         <div class="table-scroll"><table id="pts-table"></table></div>
+        <details id="pos-details" hidden>
+          <summary>Repetição e posição (mesma massa)</summary>
+          <p class="small">Repita a mesma carga várias vezes (0 → carga → 0) e em várias posições. Se a massa muda com a posição, o erro é espacial; se todas as posições erram igual, é de ganho.</p>
+          <div class="table-scroll"><table id="pos-table"></table></div>
+        </details>
         <div class="controls">
           <button type="button" class="action" id="pts-clear" disabled>Apagar todos os pontos</button>
           <div class="confirm" id="pts-confirm" hidden>
@@ -367,7 +409,12 @@
 <script>
 (() => {
   const fmt = (v, d = 0) => Number(v).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
-  const massText = (kg) => kg >= 1 ? `${fmt(kg, 2)} kg` : `${fmt(kg * 1000, 0)} g`;
+  const massText = (kg) => Math.abs(kg) >= 1 ? `${fmt(kg, 2)} kg` : `${fmt(kg * 1000, 0)} g`;
+  const signedMass = (kg) => `${kg >= 0 ? "+" : "−"}${massText(Math.abs(kg))}`;
+  const SITUATION_TEXT = {
+    INACTIVE: "abaixo do limiar", IN_RANGE: "dentro da curva", LOW_SUPPORT: "trecho sem dados (abaixo do 1º nó)",
+    LOW_SENSITIVITY: "baixa sensibilidade", OUT_OF_CALIBRATION: "acima da faixa calibrada", DIGITAL_SATURATION: "saturação digital",
+  };
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const slot = (i) => `--series-${i + 1}`;
   const SECTOR_NAMES = {
@@ -709,12 +756,20 @@
     document.getElementById("sectors").innerHTML = LAYOUT.flat().map(id => {
       const s = by[id];
       const warn = s.cells_out_of_calibration
-        ? `<div class="warn"><b>⚠ fora da faixa:</b> ${s.cells_out_of_calibration} célula(s)</div>` : "";
+        ? `<div class="warn"><b>⚠ fora da faixa:</b> ${s.cells_out_of_calibration} célula(s), ${massText(s.out_of_calibration_mass_kg || 0)} cortados no último nó</div>` : "";
+      const info = [
+        s.cells_low_sensitivity ? `${s.cells_low_sensitivity} baixa sensib.` : "",
+        s.cells_low_support ? `${s.cells_low_support} sem dados (abaixo do 1º nó)` : "",
+        s.cells_digital_saturation ? `${s.cells_digital_saturation} saturada(s)` : "",
+      ].filter(Boolean).join(" · ");
+      const hyst = s.hysteresis_up_minus_down_kg != null && s.active_cells
+        ? `<div class="meta">UP − DOWN ${signedMass(s.hysteresis_up_minus_down_kg)} (local)</div>` : "";
       return `<div class="tile${s.active ? "" : " off"}">
         <div class="name">Setor ${id} · ${SECTOR_NAMES[id]}${s.active ? "" : " · fora da medição"}</div>
         <div class="mass">${massText(s.mass_kg)}</div>
-        <div class="meta">local ${massText(s.local_mass_kg ?? s.mass_kg)} × α ${fmt(s.gain ?? 1, 3)}</div>
+        <div class="meta">L<sub>${id}</sub> = ${massText(s.local_mass_kg ?? s.mass_kg)} × α ${fmt(s.gain ?? 1, 3)}</div>
         <div class="meta">Σ RAW ${fmt(s.raw_sum, 1)} · ${s.active_cells} células · máx ${fmt(s.max_raw, 1)}</div>
+        ${hyst}${info ? `<div class="meta">${info}</div>` : ""}
         ${warn}</div>`;
     }).join("");
   }
@@ -748,7 +803,7 @@
       const r = await fetch("/api/v1/calibration/extraction", { cache: "no-store" });
       if (!r.ok) throw new Error(`extração: HTTP ${r.status}`);
       last = await r.json();
-      drawHeat(last); drawSectors(last); drawStatus(last); drawGainLive();
+      drawHeat(last); drawSectors(last); drawStatus(last); drawGainLive(); drawDiag(last);
       document.getElementById("live-error").textContent = "";
     } catch (e) {
       document.getElementById("live-error").textContent = `Sem leitura do edge-service: ${e.message}`;
@@ -764,14 +819,95 @@
     const { row, col } = fromScreen(x, y);
     if (row < 0 || row > 31 || col < 0 || col > 63) { heatTip.style.display = "none"; return; }
     const g = last.cell_mass_g[row][col], raw = last.corrected_raw[row][col];
+    const sit = last.cell_situations ? last.cell_situations[last.cell_situation[row][col]] : null;
+    const slope = last.dm_d_raw_g ? last.dm_d_raw_g[row][col] : null;
     heatTip.innerHTML = `<b>Setor ${sectorOf(row, col)}</b> · célula ${row}x${col}<br>` +
-      `RAW ${fmt(raw, 1)} → ${fmt(g, 1)} g (massa local)${last.out_of_calibration[row][col] ? "<br>acima da faixa calibrada" : ""}`;
+      `RAW ${fmt(raw, 1)} → ${fmt(g, 1)} g (massa local)` +
+      `${slope ? `<br>dm/dRAW ${fmt(slope, 2)} g por RAW` : ""}` +
+      `${sit && sit !== "INACTIVE" && sit !== "IN_RANGE" ? `<br>${SITUATION_TEXT[sit]}` : ""}`;
     heatTip.style.display = "block";
     const wb = document.getElementById("heat-wrap").getBoundingClientRect();
     heatTip.style.left = `${ev.clientX - wb.left + 12}px`;
     heatTip.style.top = `${ev.clientY - wb.top + 12}px`;
   });
   canvas.addEventListener("mouseleave", () => { heatTip.style.display = "none"; });
+
+  // ------------------------------------------------- diagnóstico da calibração
+  const D = (id) => document.getElementById(id);
+  const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+  function drawDiag(data) {
+    const t = data.totals;
+    if (!t) return;
+    const metric = (k, v, s, main) => `<div class="metric${main ? " main" : ""}"><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`;
+    D("diag-metrics").innerHTML =
+      metric("Soma das curvas (α = 1)", massText(t.mass_without_gain_kg), `com α: ${massText(t.mass_kg)}`, true) +
+      metric("Células ativas", fmt(t.n_active_cells), "acima do limiar de RAW") +
+      metric("Acima da faixa calibrada", fmt(t.n_out_of_calibration), `${fmt(t.out_of_calibration_mass_pct, 1)}% da massa vem delas`) +
+      metric("Baixa sensibilidade", fmt(t.n_low_sensitivity), `mais de ${fmt(data.low_sensitivity_g_per_raw, 1)} g por RAW`) +
+      metric("Trecho sem dados", fmt(t.n_low_support), "abaixo do 1º nó; a menor massa deu RAW 0") +
+      metric("Saturação digital", fmt(t.n_digital_saturation), "RAW no limite do conversor") +
+      metric("Histerese UP − DOWN", t.hysteresis_up_minus_down_kg == null ? "—" : signedMass(t.hysteresis_up_minus_down_kg), "mesma leitura pela curva de descida");
+    drawResidual(data.residual_mass_empty);
+  }
+
+  function drawResidual(r) {
+    if (!r) return;
+    if (!r.n_frames) {
+      D("residual-kv").innerHTML = `<span>${r.tare_id ? "Esperando a maca vazia." : "Faça a tara para começar."}</span>`;
+      D("residual-table").innerHTML = "";
+      return;
+    }
+    D("residual-kv").innerHTML =
+      `<span>Média <b>${signedMass(r.mean_kg)}</b></span><span>desvio <b>${massText(r.std_kg)}</b></span>` +
+      `<span>máximo |M| <b>${massText(r.max_abs_kg)}</b></span><span>agora <b>${signedMass(r.last_kg)}</b></span>` +
+      `<span>${fmt(r.n_frames)} frames em ${fmt(r.duration_s / 60, 1)} min</span>`;
+    const ids = Object.keys(r.sectors).sort();
+    D("residual-table").innerHTML = `<tr><th>Setor</th>${ids.map(s => `<th>${s}</th>`).join("")}</tr>` +
+      `<tr><td>Média</td>${ids.map(s => `<td>${signedMass(r.sectors[s].mean_kg)}</td>`).join("")}</tr>` +
+      `<tr><td>Máximo |M|</td>${ids.map(s => `<td>${massText(r.sectors[s].max_abs_kg)}</td>`).join("")}</tr>`;
+  }
+
+  D("residual-reset").addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/v1/diagnostics/residual/reset", { method: "POST", cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      drawResidual(await r.json());
+      D("residual-msg").textContent = "Contagem recomeçada.";
+    } catch (e) { D("residual-msg").textContent = `Não foi possível recomeçar: ${e.message}`; }
+  });
+
+  async function loadAudit() {
+    try {
+      const r = await fetch("/api/v1/diagnostics/calibration", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const a = await r.json();
+      D("diag-alerts").innerHTML = a.alerts.length ? a.alerts.map(x => `<li>${esc(x)}</li>`).join("") : "<li>Nenhum alerta.</li>";
+    } catch (e) { D("diag-alerts").innerHTML = `<li>Sem auditoria: ${esc(e.message)}</li>`; }
+  }
+
+  async function pollCells() {
+    try {
+      if (D("cells-details").open) {
+        const r = await fetch("/api/v1/diagnostics/cells?limit=25", { cache: "no-store" });
+        if (!r.ok) throw new Error(`células: HTTP ${r.status}`);
+        const data = await r.json();
+        D("cells-table").innerHTML = `<tr><th>Célula</th><th>Setor</th><th>RAW</th><th>Baseline</th><th>RAW corrigido</th>` +
+          `<th>Massa local</th><th>pela DOWN</th><th>dm/dRAW</th><th style="text-align:left">Situação</th></tr>` +
+          (data.cells.length ? data.cells.map(c => `<tr><td>${c.cell}</td><td>${c.sector}</td><td>${fmt(c.raw, 1)}</td>` +
+            `<td>${c.baseline == null ? "—" : fmt(c.baseline, 1)}</td><td>${fmt(c.corrected_raw, 1)}</td>` +
+            `<td><b>${fmt(c.local_mass_g, 1)} g</b></td><td>${c.local_mass_down_g == null ? "—" : `${fmt(c.local_mass_down_g, 1)} g`}</td>` +
+            `<td>${fmt(c.dm_d_raw_g, 2)} g</td><td style="text-align:left">${SITUATION_TEXT[c.situation] || c.situation}</td></tr>`).join("")
+            : `<tr><td colspan="9" class="small" style="text-align:left">Nenhuma célula ativa.</td></tr>`);
+      }
+      D("diag-error").textContent = "";
+    } catch (e) {
+      D("diag-error").textContent = `Sem diagnóstico por célula: ${e.message}`;
+    } finally {
+      setTimeout(pollCells, 2000);
+    }
+  }
+  D("cells-details").addEventListener("toggle", () => { if (D("cells-details").open) D("cells-table").innerHTML = "<tr><td class='small'>Carregando…</td></tr>"; });
 
   // ------------------------------------------------- comparação de modelos
   let cmp = null;
@@ -1016,7 +1152,8 @@
     if (kg == null) return;
     busy = true; drawGainLive();
     try {
-      gain = await api("POST", "/api/v1/calibration/gain/points", { known_mass_kg: kg, note: G("gain-note").value || null });
+      gain = await api("POST", "/api/v1/calibration/gain/points",
+        { known_mass_kg: kg, note: G("gain-note").value || null, position: G("gain-position").value || null });
       const p = gain.points[gain.points.length - 1];
       say("cap-msg", `Ponto ${gain.points.length} registrado: ${massText(p.known_mass_kg)} reais, soma das curvas ${massText(p.local_total_kg)} (${p.frames} frames em ${fmt(p.seconds, 1)} s).`);
       if (preview) preview = null;
@@ -1042,10 +1179,11 @@
       : gainMode === "setor"
         ? `Um α por setor precisa de cargas em posições diferentes; com ${pts.length} pontos para ${gain.active_blocks.length} setores, cada α é puxado para o α da manta (λ maior puxa mais).`
         : "Um α para a manta inteira: o mais seguro com poucos pontos ou carga sempre no mesmo lugar.";
-    if (!pts.length) { G("pts-table").innerHTML = ""; return; }
+    if (!pts.length) { G("pts-table").innerHTML = ""; G("pos-details").hidden = true; return; }
     const rows = pts.map((p, i) => {
       const err = p.current_error_kg;
-      return `<tr><td>${i + 1}</td><td>${timeText(p.created_at)}</td><td style="text-align:left">${p.note ? p.note.replace(/</g, "&lt;") : "—"}</td>` +
+      const where = [p.position, p.note].filter(Boolean).join(" · ");
+      return `<tr><td>${i + 1}</td><td>${timeText(p.created_at)}</td><td style="text-align:left">${where ? where.replace(/</g, "&lt;") : "—"}</td>` +
         `<td><b>${massText(p.known_mass_kg)}</b></td><td>${massText(p.local_total_kg)}</td><td>${massText(p.current_estimate_kg)}</td>` +
         `<td>${signed(err)} (${fmt(err / p.known_mass_kg * 100, 1)}%)</td>` +
         `<td>${p.cells_out_of_calibration ? `<span class="err">▲ ${p.cells_out_of_calibration}</span>` : "0"}</td>` +
@@ -1054,6 +1192,15 @@
     }).join("");
     G("pts-table").innerHTML = `<tr><th>#</th><th>Hora</th><th style="text-align:left">Posição</th><th>Peso real</th>` +
       `<th>Soma das curvas (α = 1)</th><th>Com o α em vigor</th><th>Erro com o α em vigor</th><th>Fora da faixa</th><th>Tara</th><th></th></tr>${rows}`;
+    const rep = gain.position_report || [];
+    G("pos-details").hidden = rep.length === 0;
+    G("pos-table").innerHTML = rep.length ? `<tr><th>Peso real</th><th>Pontos</th><th>Viés</th><th>Repetibilidade</th><th>Entre posições</th>` +
+      `<th style="text-align:left">Por posição (erro médio)</th><th style="text-align:left">Leitura</th></tr>` +
+      rep.map(g => `<tr><td><b>${massText(g.known_mass_kg)}</b></td><td>${g.n}</td><td>${signed(g.bias_kg)}</td>` +
+        `<td>${g.repeatability_std_kg == null ? "—" : massText(g.repeatability_std_kg)}</td>` +
+        `<td>${g.position_spread_kg == null ? "—" : massText(g.position_spread_kg)}</td>` +
+        `<td style="text-align:left">${Object.entries(g.positions).map(([k, v]) => `${k} ${signed(v.mean_error_kg)} (${v.n})`).join(" · ")}</td>` +
+        `<td style="text-align:left">${g.diagnosis}</td></tr>`).join("") : "";
     G("pts-table").querySelectorAll("button[data-del]").forEach(b => b.addEventListener("click", async () => {
       try {
         gain = await api("DELETE", `/api/v1/calibration/gain/points/${b.dataset.del}`);
@@ -1196,7 +1343,7 @@
   }
 
   loadCurves().catch(e => { document.getElementById("curve-lead").innerHTML = `<span class="err">${e.message}</span>`; })
-    .finally(() => { poll(); pollCmp(); });
+    .finally(() => { poll(); pollCmp(); pollCells(); loadAudit(); });
   Promise.all([loadGain(), loadTare()]).catch(e => { G("gain-status").innerHTML = `<span class="err">Ganhos: ${e.message}</span>`; });
 })();
 </script>

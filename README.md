@@ -125,7 +125,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_service.ps1
     ```
 - **Comparação de modelos (curvas e ML):** `python apps/edge-service/scripts/comparar_modelos_massa.py`.
 - **Tela de calibração ao vivo:** `http://localhost:8000/calibracao`. Mostra as 8 curvas juntas, cada setor com seus pontos, as curvas dos modelos candidatos (curvas e ML, ajuste por setor ou global) e a massa da leitura atual por todos os modelos. Para testar com carga conhecida, informe o peso real e use "Registrar leitura"; o resumo dá o erro de cada modelo e baixa um CSV. Atalhos: `?view=all|sector|models&setor=1..8&modo=sector|global`. A primeira leitura da comparação treina os modelos (alguns segundos).
-- **Experimentos (RAW completo):** use `POST /api/v1/experiments/start`, depois `/mark` (ciclo, `known_mass_g`, `loading_direction`) e por fim `/stop`. Os dados ficam em `apps/edge-service/data/experiments/` e não vão para o git.
+- **Experimentos (RAW completo):** use `POST /api/v1/experiments/start`, depois `/mark` (ciclo, `known_mass_g`, `loading_direction` e, nos ensaios de célula, `target_cell` como `"12x34"`) e por fim `/stop`. Os dados ficam em `apps/edge-service/data/experiments/` e não vão para o git.
+- **Diagnóstico da calibração (orientações de 15/10, `docs/Orientacoes_Roger_Math_Engine_Maca_Inteligente.pdf`):**
+  - `GET /api/v1/telemetry/live` também traz L1…L8 (`sector_local_mass_kg`, sem α), `mass_without_gain_kg`, `n_active_cells`, `n_out_of_calibration` (e por setor), `out_of_calibration_mass_pct`, `n_low_sensitivity`, `n_low_support`, `n_digital_saturation`, `hysteresis_up_minus_down_kg`, `residual_mass_empty` e `calibration_alerts`.
+  - `SATURATION` continua sendo só RAW ≥ 255. `LOW_SENSITIVITY` agora vem do dm/dRAW da curva (parâmetro `low_sensitivity_g_per_raw`, padrão provisório 10 g por RAW; 0 desliga) e `LOW_DATA_SUPPORT` marca células abaixo do primeiro nó nos setores em que a menor massa deu RAW 0. As duas são só informativas.
+  - `GET /api/v1/diagnostics/cells?limit=N` lista cada célula ativa: RAW, baseline, RAW corrigido, massa local (UP e DOWN), dm/dRAW, situação na curva e flags.
+  - `GET /api/v1/diagnostics/residual` dá a massa que o modelo produz com a maca vazia desde a tara (média, desvio, máximo e por setor). Para o ensaio de zero: tara, `POST /api/v1/diagnostics/residual/reset` e 10 minutos sem carga.
+  - `GET /api/v1/diagnostics/calibration` audita as curvas: correção isotônica (medido × regularizado, por setor e por célula, UP e DOWN), massas sem resposta, histerese, baixa sensibilidade e setores com uma célula só.
+  - Na tela `/calibracao`, o card "Diagnóstico da calibração" mostra tudo isso ao vivo, e os pontos de carga ganharam a posição (centro, cabeceira, peseira, esquerda, direita), com o resumo de repetição e posição (erro espacial × erro de ganho).
+  - Ensaios por célula: `python apps/edge-service/scripts/exportar_ensaios_celula.py data/experiments/<sessão> --saida ensaios.csv` gera um patamar por célula, ciclo, sentido e massa. `python apps/edge-service/scripts/comparar_generalizacao_celulas.py [--ensaios ensaios.csv]` compara, deixando cada célula de fora, a curva global (A), a do setor (B) e a do setor com ganho individual (C).
 
 ### 5. Execução dos Testes Automatizados
 ```bash

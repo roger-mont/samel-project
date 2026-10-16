@@ -8,6 +8,8 @@ Modelos disponíveis:
   local m̂_ij = f_s(x_ij)) e somada com o ganho do setor (massa total
   M = Σ_s α_s · Σ_{ij∈s} m̂_ij). Formas de curva: pchip, linear_interp (também
   serve para o resultado de uma regressão isotônica), power, exponential, polynomial.
+  Também dá o diagnóstico célula a célula (dm/dRAW, faixa pouco suportada, fora
+  da curva, saturação digital e curva DOWN) das orientações de 15/10.
 - "ml": modelo treinado por scripts/train_weight_model.py (somas por bloco do RAW).
 - "legacy_blocks": calibration.json antigo (polinômios por bloco).
 """
@@ -109,18 +111,27 @@ def _pchip_end_slope(h0: float, h1: float, d0: float, d1: float) -> float:
     return val
 
 
-def _make_pchip(raw: list[float], mass: list[float]) -> Callable[[np.ndarray], np.ndarray]:
+def _knots(raw: list[float], mass: list[float], kind: str) -> tuple[np.ndarray, np.ndarray]:
     xk = np.asarray(raw, dtype=np.float64)
     yk = np.asarray(mass, dtype=np.float64)
     if len(xk) < 2 or np.any(np.diff(xk) <= 0):
-        raise ValueError("pchip exige ao menos 2 pontos com RAW estritamente crescente")
+        raise ValueError(f"{kind} exige ao menos 2 pontos com RAW estritamente crescente")
+    return xk, yk
+
+
+def _pchip_segment(xk: np.ndarray, x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    xc = np.clip(x, xk[0], xk[-1])
+    i = np.clip(np.searchsorted(xk, xc) - 1, 0, len(xk) - 2)
+    h = xk[i + 1] - xk[i]
+    return i, h, (xc - xk[i]) / h
+
+
+def _make_pchip(raw: list[float], mass: list[float]) -> Callable[[np.ndarray], np.ndarray]:
+    xk, yk = _knots(raw, mass, "pchip")
     dk = _pchip_slopes(xk, yk)
 
     def f(x: np.ndarray) -> np.ndarray:
-        xc = np.clip(x, xk[0], xk[-1])
-        i = np.clip(np.searchsorted(xk, xc) - 1, 0, len(xk) - 2)
-        h = xk[i + 1] - xk[i]
-        t = (xc - xk[i]) / h
+        i, h, t = _pchip_segment(xk, x)
         h00 = (1 + 2 * t) * (1 - t) ** 2
         h10 = t * (1 - t) ** 2
         h01 = t ** 2 * (3 - 2 * t)
@@ -130,12 +141,52 @@ def _make_pchip(raw: list[float], mass: list[float]) -> Callable[[np.ndarray], n
     return f
 
 
+def _make_pchip_derivative(raw: list[float], mass: list[float]) -> Callable[[np.ndarray], np.ndarray]:
+    """dm/dRAW da PCHIP (kg por RAW), avaliada dentro da faixa dos nós."""
+    xk, yk = _knots(raw, mass, "pchip")
+    dk = _pchip_slopes(xk, yk)
+
+    def df(x: np.ndarray) -> np.ndarray:
+        i, h, t = _pchip_segment(xk, x)
+        d00 = 6 * t ** 2 - 6 * t
+        d10 = 3 * t ** 2 - 4 * t + 1
+        d01 = -6 * t ** 2 + 6 * t
+        d11 = 3 * t ** 2 - 2 * t
+        return (d00 * yk[i] + d01 * yk[i + 1]) / h + d10 * dk[i] + d11 * dk[i + 1]
+
+    return df
+
+
 def _make_linear(raw: list[float], mass: list[float]) -> Callable[[np.ndarray], np.ndarray]:
-    xk = np.asarray(raw, dtype=np.float64)
-    yk = np.asarray(mass, dtype=np.float64)
-    if len(xk) < 2 or np.any(np.diff(xk) <= 0):
-        raise ValueError("linear_interp exige ao menos 2 pontos com RAW estritamente crescente")
+    xk, yk = _knots(raw, mass, "linear_interp")
     return lambda x: np.interp(x, xk, yk)
+
+
+def _make_linear_derivative(raw: list[float], mass: list[float]) -> Callable[[np.ndarray], np.ndarray]:
+    xk, yk = _knots(raw, mass, "linear_interp")
+    slopes = np.diff(yk) / np.diff(xk)
+
+    def df(x: np.ndarray) -> np.ndarray:
+        i = np.clip(np.searchsorted(xk, np.clip(x, xk[0], xk[-1]), side="right") - 1, 0, len(xk) - 2)
+        return slopes[i]
+
+    return df
+
+
+def build_curve_derivative(kind: str, params: dict[str, Any]) -> Callable[[np.ndarray], np.ndarray]:
+    """dm/dRAW da curva f(x; θ), em kg por RAW. Base do LOW_SENSITIVITY (item 3.2)."""
+    if kind == "pchip":
+        return _make_pchip_derivative(params["raw"], params["mass_kg"])
+    if kind == "linear_interp":
+        return _make_linear_derivative(params["raw"], params["mass_kg"])
+    f = build_curve(kind, params)
+
+    def df(x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float64)
+        lo, hi = np.maximum(x - 0.25, 0.0), x + 0.25
+        return (f(hi) - f(lo)) / (hi - lo)
+
+    return df
 
 
 def build_curve(kind: str, params: dict[str, Any]) -> Callable[[np.ndarray], np.ndarray]:
@@ -168,6 +219,44 @@ class BlockCurve:
     mass_min_valid: float
     mass_max_valid: float
     low_sensitivity_raw: float | None   # início da região de baixa sensibilidade (ainda não definido)
+    derivative: Callable[[np.ndarray], np.ndarray] | None = None   # dm/dRAW em kg por RAW
+    # Até este RAW a curva só liga (0,0) ao primeiro nó medido, porque a menor massa
+    # ensaiada deu RAW 0 (setores 4 e 5): região pouco suportada por dados.
+    low_support_raw: float | None = None
+    zero_response_mass_kg: float | None = None
+    down_curve: Callable[[np.ndarray], np.ndarray] | None = None   # ramo DOWN, só para histerese
+
+
+# Situação da célula na curva do setor, da menos para a mais grave (itens 3.2, 3.3 e 3.7)
+CELL_SITUATIONS = ("INACTIVE", "IN_RANGE", "LOW_SUPPORT", "LOW_SENSITIVITY", "OUT_OF_CALIBRATION", "DIGITAL_SATURATION")
+SIT_INACTIVE, SIT_IN_RANGE, SIT_LOW_SUPPORT, SIT_LOW_SENSITIVITY, SIT_OUT_OF_CALIBRATION, SIT_DIGITAL_SATURATION = range(6)
+
+
+def cell_name(row: int, column: int) -> str:
+    """Identificação da célula como nas pastas de docs/: linha x coluna da matriz."""
+    return f"{row}x{column}"
+
+
+@dataclass(frozen=True)
+class CellDiagnostics:
+    """Diagnóstico célula a célula da janela (matrizes 32×64)."""
+
+    corrected: np.ndarray            # x_ij = max(0, s_ij − B_ij), média da janela
+    local_mass_kg: np.ndarray        # f_s(x_ij), sem o ganho α_s
+    local_mass_down_kg: np.ndarray   # pela curva DOWN; NaN no setor sem curva de descida
+    dm_d_raw_g: np.ndarray           # g por RAW na leitura (no último nó, se acima dele)
+    active: np.ndarray
+    low_support: np.ndarray
+    low_sensitivity: np.ndarray
+    out_of_calibration: np.ndarray
+    digital_saturation: np.ndarray
+    situation: np.ndarray            # índice em CELL_SITUATIONS (a situação mais grave)
+
+
+def _zero_response(fit: list[dict[str, Any]]) -> float | None:
+    """Maior massa ensaiada que não produziu RAW (patamar em 0)."""
+    masses = [float(p["mass_kg"]) for p in fit or [] if float(p["mass_kg"]) > 0 and float(p["raw_mean"]) <= 0]
+    return max(masses) if masses else None
 
 
 class BlockCurveModel(MassModel):
@@ -197,6 +286,9 @@ class BlockCurveModel(MassModel):
             data = json.loads(self._path.read_text(encoding="utf-8"))
             self._raw_json = data
             for bid_str, b in data["blocks"].items():
+                zero_mass = _zero_response(b.get("fit", []))
+                first_node = next((float(r) for r in b["params"].get("raw", []) if float(r) > 0), None)
+                down = b.get("down_curve_not_used")
                 self._curves[int(bid_str)] = BlockCurve(
                     curve=build_curve(b["kind"], b["params"]),
                     raw_min_valid=float(b["raw_min_valid"]),
@@ -206,6 +298,10 @@ class BlockCurveModel(MassModel):
                     low_sensitivity_raw=(
                         float(b["low_sensitivity_raw"]) if b.get("low_sensitivity_raw") is not None else None
                     ),
+                    derivative=build_curve_derivative(b["kind"], b["params"]),
+                    low_support_raw=first_node if zero_mass is not None else None,
+                    zero_response_mass_kg=zero_mass,
+                    down_curve=build_curve(down["kind"], down["params"]) if down else None,
                 )
             aggregation = data.get("aggregation") or {}
             gains = aggregation.get("gains") or {}
@@ -284,41 +380,179 @@ class BlockCurveModel(MassModel):
         ys = np.maximum(c.curve(xs), 0.0) * 1000.0
         return [[round(float(x), 3), round(float(y), 3)] for x, y in zip(xs, ys)]
 
-    def breakdown(self, corrected: np.ndarray, active_blocks: list[int]) -> dict[str, Any]:
-        """Extração célula a célula e por setor, com a curva de cada setor."""
-        cell_mass = np.zeros_like(corrected, dtype=np.float64)
-        out_mask = np.zeros_like(corrected, dtype=bool)
-        sectors: list[dict[str, Any]] = []
-        for bid, (row_sl, col_sl) in sorted(BLOCK_REGIONS.items()):
+    def curve_info(self, block_id: int) -> BlockCurve:
+        return self._curves[block_id]
+
+    def cell_diagnostics(
+        self,
+        corrected: np.ndarray,
+        raw: np.ndarray | None = None,
+        saturation_raw: float | None = None,
+        low_sensitivity_g_per_raw: float = 0.0,
+    ) -> CellDiagnostics:
+        """Situação de cada célula na curva do seu setor (itens 3.2, 3.3, 3.7 e 3.8).
+
+        LOW_SENSITIVITY: dm/dRAW acima de low_sensitivity_g_per_raw (0 desliga) ou RAW
+        acima de low_sensitivity_raw do block_curves.json. DIGITAL_SATURATION é só o
+        RAW medido no limite do conversor, sem relação com a faixa calibrada.
+        """
+        shape = corrected.shape
+        mass = np.zeros(shape)
+        mass_down = np.full(shape, np.nan)
+        dm = np.zeros(shape)
+        active = np.zeros(shape, dtype=bool)
+        support = np.zeros(shape, dtype=bool)
+        low = np.zeros(shape, dtype=bool)
+        out = np.zeros(shape, dtype=bool)
+        sat = np.zeros(shape, dtype=bool)
+        if raw is not None and saturation_raw is not None:
+            sat = np.asarray(raw) >= saturation_raw
+        for bid, region in BLOCK_REGIONS.items():
             c = self._curves[bid]
-            x = corrected[row_sl, col_sl]
-            valid = x >= c.raw_min_valid
-            m = self.local_mass(bid, x)
-            out = valid & (x > c.raw_max_valid)
-            cell_mass[row_sl, col_sl] = m
-            out_mask[row_sl, col_sl] = out
+            x = corrected[region]
+            on = x >= c.raw_min_valid
+            o = on & (x > c.raw_max_valid)
+            slope = (c.derivative(np.minimum(x, c.raw_max_valid)) * 1000.0
+                     if c.derivative is not None else np.zeros_like(x))
+            lo = np.zeros_like(on)
+            if low_sensitivity_g_per_raw > 0:
+                lo |= slope > low_sensitivity_g_per_raw
+            if c.low_sensitivity_raw is not None:
+                lo |= x > c.low_sensitivity_raw
+            active[region] = on
+            mass[region] = self.local_mass(bid, x)
+            dm[region] = np.where(on, slope, 0.0)
+            out[region] = o
+            low[region] = on & ~o & lo
+            if c.low_support_raw is not None:
+                support[region] = on & (x < c.low_support_raw)
+            if c.down_curve is not None:
+                mass_down[region] = np.where(on, np.maximum(c.down_curve(x), 0.0), 0.0)
+        situation = np.full(shape, SIT_INACTIVE, dtype=np.int8)
+        situation[active] = SIT_IN_RANGE
+        situation[support] = SIT_LOW_SUPPORT
+        situation[low] = SIT_LOW_SENSITIVITY
+        situation[out] = SIT_OUT_OF_CALIBRATION
+        situation[sat] = SIT_DIGITAL_SATURATION
+        return CellDiagnostics(corrected, mass, mass_down, dm, active, support, low, out, sat, situation)
+
+    def sector_summary(self, cd: CellDiagnostics, active_blocks: list[int]) -> dict[str, Any]:
+        """L_s, contagens e histerese por setor, e os totais dos setores ativos (itens 3.4, 3.7, 3.8 e 8)."""
+        sectors: list[dict[str, Any]] = []
+        for bid, region in sorted(BLOCK_REGIONS.items()):
+            x = cd.corrected[region]
+            on = cd.active[region]
+            o = cd.out_of_calibration[region]
+            m = cd.local_mass_kg[region]
             local = float(np.sum(m))
+            down = cd.local_mass_down_kg[region]
+            has_down = not np.isnan(down).all()
+            local_down = float(np.nansum(down)) if has_down else None
+            rows, cols = np.nonzero(o)
+            r0, c0 = region[0].start, region[1].start
             sectors.append({
                 "sector": bid,
                 "active": bid in active_blocks,
-                "raw_sum": round(float(np.sum(x[valid])), 2),
-                "active_cells": int(np.count_nonzero(valid)),
+                "raw_sum": round(float(np.sum(x[on])), 2),
+                "active_cells": int(np.count_nonzero(on)),
                 "max_raw": round(float(np.max(x)), 2),
                 "local_mass_kg": round(local, 4),
                 "gain": self._gains[bid],
                 "mass_kg": round(local * self._gains[bid], 4),
-                "cells_out_of_calibration": int(np.count_nonzero(out)),
-                "cells_low_sensitivity": (int(np.count_nonzero(valid & (x > c.low_sensitivity_raw)))
-                                          if c.low_sensitivity_raw is not None else 0),
+                "cells_out_of_calibration": int(np.count_nonzero(o)),
+                "out_of_calibration_cells": [cell_name(int(r) + r0, int(c) + c0) for r, c in zip(rows, cols)],
+                "out_of_calibration_mass_kg": round(float(np.sum(m[o])), 4),
+                "cells_low_sensitivity": int(np.count_nonzero(cd.low_sensitivity[region])),
+                "cells_low_support": int(np.count_nonzero(cd.low_support[region])),
+                "cells_digital_saturation": int(np.count_nonzero(cd.digital_saturation[region])),
+                "max_dm_d_raw_g": round(float(np.max(cd.dm_d_raw_g[region])), 2),
+                "local_mass_down_kg": None if local_down is None else round(local_down, 4),
+                "hysteresis_up_minus_down_kg": None if local_down is None else round(local - local_down, 4),
             })
-        total = sum(s["mass_kg"] for s in sectors if s["active"])
+        on = [s for s in sectors if s["active"]]
+        total = sum(s["mass_kg"] for s in on)
+        without_gain = sum(s["local_mass_kg"] for s in on)
+        out_mass = sum(s["out_of_calibration_mass_kg"] for s in on)
+        with_down = [s for s in on if s["local_mass_down_kg"] is not None]
         return {
             "sectors": sectors,
+            "totals": {
+                "mass_kg": round(total, 4),
+                "mass_without_gain_kg": round(without_gain, 4),
+                "n_active_cells": sum(s["active_cells"] for s in on),
+                "n_out_of_calibration": sum(s["cells_out_of_calibration"] for s in on),
+                "n_low_sensitivity": sum(s["cells_low_sensitivity"] for s in on),
+                "n_low_support": sum(s["cells_low_support"] for s in on),
+                "n_digital_saturation": sum(s["cells_digital_saturation"] for s in on),
+                "out_of_calibration_mass_kg": round(out_mass, 4),
+                "out_of_calibration_mass_pct": round(100.0 * out_mass / without_gain, 1) if without_gain > 0 else 0.0,
+                "hysteresis_up_minus_down_kg": (
+                    round(sum(self._gains[s["sector"]] * s["hysteresis_up_minus_down_kg"] for s in with_down), 4)
+                    if with_down else None),
+                "sectors_without_down_curve": [s["sector"] for s in on if s["local_mass_down_kg"] is None],
+            },
+        }
+
+    def cell_records(
+        self,
+        cd: CellDiagnostics,
+        raw: np.ndarray | None = None,
+        baseline: np.ndarray | None = None,
+        only_active: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Contribuição de cada célula (item 3.3), da maior massa local para a menor."""
+        records: list[dict[str, Any]] = []
+        sector_of = np.zeros(cd.corrected.shape, dtype=int)
+        for bid, region in BLOCK_REGIONS.items():
+            sector_of[region] = bid
+        mask = cd.active | cd.digital_saturation if only_active else np.ones(cd.corrected.shape, dtype=bool)
+        for r, c in zip(*np.nonzero(mask)):
+            r, c = int(r), int(c)
+            flags = [name for name, on in (
+                ("LOW_SUPPORT", cd.low_support[r, c]), ("LOW_SENSITIVITY", cd.low_sensitivity[r, c]),
+                ("OUT_OF_CALIBRATION", cd.out_of_calibration[r, c]), ("DIGITAL_SATURATION", cd.digital_saturation[r, c]),
+            ) if on]
+            down = cd.local_mass_down_kg[r, c]
+            records.append({
+                "cell": cell_name(r, c),
+                "cell_id": r * cd.corrected.shape[1] + c,
+                "row": r,
+                "column": c,
+                "sector": int(sector_of[r, c]),
+                "raw": None if raw is None else round(float(raw[r, c]), 2),
+                "baseline": None if baseline is None else round(float(baseline[r, c]), 2),
+                "corrected_raw": round(float(cd.corrected[r, c]), 2),
+                "local_mass_g": round(float(cd.local_mass_kg[r, c]) * 1000.0, 2),
+                "local_mass_down_g": None if np.isnan(down) else round(float(down) * 1000.0, 2),
+                "dm_d_raw_g": round(float(cd.dm_d_raw_g[r, c]), 3),
+                "situation": CELL_SITUATIONS[int(cd.situation[r, c])],
+                "flags": flags,
+            })
+        records.sort(key=lambda rec: rec["local_mass_g"], reverse=True)
+        return records
+
+    def breakdown(
+        self,
+        corrected: np.ndarray,
+        active_blocks: list[int],
+        raw: np.ndarray | None = None,
+        saturation_raw: float | None = None,
+        low_sensitivity_g_per_raw: float = 0.0,
+    ) -> dict[str, Any]:
+        """Extração célula a célula e por setor, com a curva de cada setor."""
+        cd = self.cell_diagnostics(corrected, raw, saturation_raw, low_sensitivity_g_per_raw)
+        summary = self.sector_summary(cd, active_blocks)
+        return {
+            "sectors": summary["sectors"],
+            "totals": summary["totals"],
             "gains_calibrated": self._gains_calibrated,
-            "total_mass_kg": round(total, 4),
-            "cell_mass_g": np.round(cell_mass * 1000.0, 1).tolist(),
+            "total_mass_kg": summary["totals"]["mass_kg"],
+            "cell_mass_g": np.round(cd.local_mass_kg * 1000.0, 1).tolist(),
             "corrected_raw": np.round(corrected, 1).tolist(),
-            "out_of_calibration": out_mask.astype(int).tolist(),
+            "out_of_calibration": cd.out_of_calibration.astype(int).tolist(),
+            "dm_d_raw_g": np.round(cd.dm_d_raw_g, 2).tolist(),
+            "cell_situation": cd.situation.astype(int).tolist(),
+            "cell_situations": list(CELL_SITUATIONS),
         }
 
     def estimate(self, frame: WindowFrame) -> MassEstimate:

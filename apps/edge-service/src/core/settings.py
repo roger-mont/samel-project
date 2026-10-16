@@ -47,7 +47,10 @@ class CalibrationParams:
     delta_threshold_rel: float = 0.01       # DELTA_THRESHOLD: D/μ máximo
     min_stable_time_s: float = 15.0         # MIN_STABLE_TIME: tempo contínuo com o critério atendido
     movement_threshold_rel: float = 0.15    # D_mov: D_M/μ acima do qual há movimento
-    saturation_raw: float = float(RAW_MAX)  # leitura que marca célula saturada
+    saturation_raw: float = float(RAW_MAX)  # leitura que marca célula saturada (saturação digital)
+    # LOW_SENSITIVITY: célula em que 1 RAW vale mais que isto em gramas (dm/dRAW da curva).
+    # Valor provisório, a ser definido nos ensaios; 0 desliga. Só informativo.
+    low_sensitivity_g_per_raw: float = 10.0
 
     _lock: threading.Lock = field(
         default_factory=threading.Lock,

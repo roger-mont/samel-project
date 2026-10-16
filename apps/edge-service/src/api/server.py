@@ -26,7 +26,9 @@ from fastapi.responses import FileResponse
 
 from core.config import LOG_LEVEL, MACA_ID, config_manager
 from database.db_local import LocalDatabase
-from math_engine.gain_fit import MODES as GAIN_MODES, curves_sha1, fit_gains, fit_report, leave_one_out, write_gains
+from math_engine.gain_fit import (
+    MODES as GAIN_MODES, POSITIONS, curves_sha1, fit_gains, fit_report, leave_one_out, position_report, write_gains,
+)
 from math_engine.mass_models import BlockCurveModel
 from math_engine.model_comparison import MODES, ComparisonCache, ModelComparison
 from workers.sync_worker import SyncWorker
@@ -93,6 +95,7 @@ class CalibrationUpdatePayload(BaseModel):
 class GainPointPayload(BaseModel):
     known_mass_kg: float = Field(..., gt=0.0, le=500.0, description="Massa real sobre a maca, em kg")
     note: str | None = Field(default=None, max_length=80, description="Ex.: placa no centro, setores 2 e 7")
+    position: str | None = Field(default=None, description="Posição da carga: " + " | ".join(POSITIONS))
 
 
 class GainFitPayload(BaseModel):
@@ -110,6 +113,7 @@ class ExperimentMarkPayload(BaseModel):
     cycle_id: int | None = Field(default=None, ge=0)
     known_mass_g: float | None = Field(default=None, ge=0.0)
     loading_direction: str | None = Field(default=None, description="UP | DOWN | UNKNOWN")
+    target_cell: str | None = Field(default=None, description="Célula ensaiada, 'linha x coluna' (ex.: 12x34); '' limpa")
 
 
 # -----------------------------------------------------------------------------
@@ -324,12 +328,13 @@ def start_experiment(payload: ExperimentStartPayload, request: Request) -> dict[
 
 @app.post("/api/v1/experiments/mark", tags=["Experimentos"])
 def mark_experiment(payload: ExperimentMarkPayload, request: Request) -> dict[str, Any]:
-    """Registra, a partir de agora, ciclo, massa conhecida e sentido de carga."""
+    """Registra, a partir de agora, ciclo, massa conhecida, sentido de carga e célula ensaiada."""
     try:
         return _get_acq(request.app).recorder.mark(
             cycle_id=payload.cycle_id,
             known_mass_g=payload.known_mass_g,
             loading_direction=payload.loading_direction,
+            target_cell=payload.target_cell,
         )
     except RuntimeError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
@@ -561,9 +566,11 @@ def get_model_info(request: Request) -> dict[str, Any]:
 @app.get("/api/v1/calibration/curves", tags=["Calibração"])
 def get_calibration_curves(request: Request) -> dict[str, Any]:
     """Curvas em vigor por setor: fontes, pontos medidos, ajuste isotônico, curva amostrada e ganhos α_s."""
-    model = _get_acq(request.app).models.models.get("block_curves")
+    acq = _get_acq(request.app)
+    model = acq.models.models.get("block_curves")
     if not isinstance(model, BlockCurveModel) or not model.is_ready:
         raise HTTPException(status_code=404, detail="block_curves.json ausente ou incompleto")
+    audit = acq.calibration_audit()
     definition = model.raw_definition
     blocks = definition["blocks"]
     sources = definition.get("sources", [])
@@ -581,6 +588,8 @@ def get_calibration_curves(request: Request) -> dict[str, Any]:
             "low_sensitivity_raw": curve.get("low_sensitivity_raw"),
             "sensitivity_g_per_raw": curve.get("sensitivity_g_per_raw", []),
             "validation": curve.get("validation"),
+            "audit": (audit or {}).get("sectors", {}).get(bid_str),
+            "down_curve": curve.get("down_curve_not_used"),
             "gain": model.gains.get(int(bid_str), 1.0),
             "samples_raw_mass_g": model.curve_samples(int(bid_str)),
         }
@@ -596,6 +605,7 @@ def get_calibration_curves(request: Request) -> dict[str, Any]:
         "gains_calibrated": model.gains_calibrated,
         "identical_in_all_sectors": len({json.dumps({k: b.get(k) for k in curve_keys}, sort_keys=True)
                                          for b in blocks.values()}) == 1,
+        "calibration_alerts": (audit or {}).get("alerts", []),
         "sectors": sectors,
     }
 
@@ -723,15 +733,20 @@ def _gain_fit(acq: AcquisitionWorker, model: BlockCurveModel, payload: GainFitPa
 def _gain_state(acq: AcquisitionWorker, model: BlockCurveModel) -> dict[str, Any]:
     aggregation = model.raw_definition.get("aggregation") or {}
     fit = aggregation.get("fit") or None
+    points = _gain_points(acq, model)
     return {
         "gains": {str(b): g for b, g in model.gains.items()},
         "calibrated": model.gains_calibrated,
+        # Item 3.9: até os ensaios de carga distribuída e de posição, o α é provisório
+        "provisional": True,
         "fit": fit,
         "fit_matches_curves": bool(fit) and fit.get("curves_sha1") == curves_sha1(model.raw_definition),
         "calibration_version": model.calibration_version,
         "active_blocks": acq.active_blocks,
         "tare_id": acq.baseline.record.tare_id if acq.baseline.record else None,
-        "points": _gain_points(acq, model),
+        "positions": list(POSITIONS),
+        "points": points,
+        "position_report": position_report(points),
     }
 
 
@@ -752,11 +767,15 @@ def add_gain_point(payload: GainPointPayload, request: Request) -> dict[str, Any
     capture = acq.stable_capture()
     if capture is None:
         raise HTTPException(status_code=409, detail="A leitura ainda não está estável. Espere o estado ficar Estável ou Válido.")
+    position = (payload.position or "").strip().lower() or None
+    if position is not None and position not in POSITIONS:
+        raise HTTPException(status_code=422, detail=f"position deve ser um de {POSITIONS}")
     corrected, frames, seconds = capture
     live = acq.get_live_snapshot()
     acq.gain_points.add(payload.known_mass_kg, corrected, {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "note": (payload.note or "").strip() or None,
+        "position": position,
         "frames": frames,
         "seconds": round(seconds, 2),
         "tare_id": acq.baseline.record.tare_id,
@@ -812,6 +831,46 @@ def reset_gains(request: Request) -> dict[str, Any]:
     write_gains(_block_model(acq).path, None, None)
     acq.models.reload()
     return _gain_state(acq, _block_model(acq))
+
+
+# -----------------------------------------------------------------------------
+# Diagnóstico da calibração (orientações de 15/10)
+# -----------------------------------------------------------------------------
+
+@app.get("/api/v1/diagnostics/cells", tags=["Diagnóstico"])
+def get_cell_diagnostics(request: Request, include_inactive: bool = False, limit: int | None = None) -> dict[str, Any]:
+    """Contribuição de cada célula na janela atual: RAW, baseline, RAW corrigido, massa local,
+    dm/dRAW, situação na curva e flags, da maior massa local para a menor (item 3.3)."""
+    data = _get_acq(request.app).cell_report(include_inactive=include_inactive)
+    if data is None:
+        raise HTTPException(status_code=409, detail="Modelo ativo não é a curva por bloco")
+    if limit is not None and limit >= 0:
+        data["cells"] = data["cells"][:limit]
+    return data
+
+
+@app.get("/api/v1/diagnostics/residual", tags=["Diagnóstico"])
+def get_residual_mass(request: Request) -> dict[str, Any]:
+    """Massa que o modelo produz com a maca vazia desde a tara (ou desde o último reset) (item 3.5)."""
+    return _get_acq(request.app).residual.snapshot()
+
+
+@app.post("/api/v1/diagnostics/residual/reset", tags=["Diagnóstico"])
+def reset_residual_mass(request: Request) -> dict[str, Any]:
+    """Recomeça a contagem da massa residual sem fazer tara nova (ensaio de zero de 10 min)."""
+    acq = _get_acq(request.app)
+    acq.residual.reset()
+    return acq.residual.snapshot()
+
+
+@app.get("/api/v1/diagnostics/calibration", tags=["Diagnóstico"])
+def get_calibration_audit(request: Request) -> dict[str, Any]:
+    """Auditoria das curvas: correção isotônica por setor e por célula (UP e DOWN), massas sem
+    resposta, histerese, baixa sensibilidade e setores de uma célula só (itens 3.6, 3.8 e 4)."""
+    audit = _get_acq(request.app).calibration_audit()
+    if audit is None:
+        raise HTTPException(status_code=409, detail="Modelo ativo não é a curva por bloco")
+    return audit
 
 
 @app.get("/calibracao", include_in_schema=False)

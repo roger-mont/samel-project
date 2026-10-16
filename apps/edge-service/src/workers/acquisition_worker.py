@@ -17,10 +17,12 @@ from core.settings import HID_COLS, HID_ROWS, SOFTWARE_VERSION, CalibrationParam
 from storage.calibration_store import BLOCK_REGIONS
 from database.db_local import LocalDatabase
 from hardware.serial_reader import BaseFrameReader, HidFrameReader, FakeSerialReader
+from math_engine.calibration_audit import audit_calibration
 from math_engine.mass_models import BlockCurveModel, MassEstimate, ModelRegistry, WindowFrame
 from math_engine.pipeline import apply_deadzone, window_mean
 from math_engine.quality import QualityFlags, saturated_cells
 from math_engine.reading_state import STATE_LABELS, ReadingState, ReadingStateMachine
+from math_engine.residual_mass import ResidualMassTracker
 from math_engine.spatial_baseline import SpatialBaseline
 from math_engine.spatial_features import compute_spatial_features
 from providers.posture_monitor import PostureMonitor
@@ -108,7 +110,10 @@ class AcquisitionWorker:
         self._auto_tare_done = False
         self._raw_window: deque[tuple[float, np.ndarray]] = deque()
         self._full_window: deque[tuple[float, np.ndarray]] = deque()  # corrigido, manta inteira
+        self._full_raw_window: deque[tuple[float, np.ndarray]] = deque()  # RAW medido, manta inteira
         self._capture_window: deque[tuple[float, bool, np.ndarray]] = deque()  # (t, estável, corrigido)
+        self.residual = ResidualMassTracker()
+        self._audit_cache: tuple[tuple[int, float], dict[str, Any]] | None = None
         self._last_valid: dict[str, Any] | None = None
         self._last_telemetry_time = time.monotonic()
         self._last_recorded_posture: str | None = None
@@ -206,6 +211,7 @@ class AcquisitionWorker:
             return None
         corrected = self.window_corrected()
         live = self.get_live_snapshot()
+        p = self.params.snapshot()
         return {
             "timestamp": live.get("timestamp"),
             "state_id": live.get("state_id"),
@@ -218,12 +224,59 @@ class AcquisitionWorker:
             "calibration_version": model.calibration_version,
             "active_blocks": self.active_blocks,
             "tare_id": live.get("tare_id"),
-            **model.breakdown(corrected, self.active_blocks),
+            "tare_in_progress": live.get("tare_in_progress"),
+            "residual_mass_empty": self.residual.snapshot(),
+            "low_sensitivity_g_per_raw": p["low_sensitivity_g_per_raw"],
+            **model.breakdown(corrected, self.active_blocks, self.window_raw(), p["saturation_raw"],
+                              p["low_sensitivity_g_per_raw"]),
         }
+
+    def cell_report(self, include_inactive: bool = False) -> dict[str, Any] | None:
+        """Contribuição de cada célula na janela atual, da maior massa local para a menor (item 3.3).
+
+        Manta inteira; setores fora de active_blocks aparecem, mas não somam nos totais.
+        """
+        model = self.models.active()
+        if not isinstance(model, BlockCurveModel) or not model.is_ready:
+            return None
+        p = self.params.snapshot()
+        corrected, raw = self.window_corrected(), self.window_raw()
+        cd = model.cell_diagnostics(corrected, raw, p["saturation_raw"], p["low_sensitivity_g_per_raw"])
+        summary = model.sector_summary(cd, self.active_blocks)
+        live = self.get_live_snapshot()
+        return {
+            "timestamp": live.get("timestamp"),
+            "weight_status": live.get("weight_status"),
+            "calibration_version": model.calibration_version,
+            "tare_id": live.get("tare_id"),
+            "active_blocks": self.active_blocks,
+            "low_sensitivity_g_per_raw": p["low_sensitivity_g_per_raw"],
+            "saturation_raw": p["saturation_raw"],
+            "totals": summary["totals"],
+            "sectors": summary["sectors"],
+            "cells": model.cell_records(cd, raw, self.baseline.mean_matrix if self.baseline.record else None,
+                                        only_active=not include_inactive),
+        }
+
+    def calibration_audit(self) -> dict[str, Any] | None:
+        """Auditoria das curvas em vigor (isotônica, faixa sem resposta, histerese), com cache."""
+        model = self.models.active()
+        if not isinstance(model, BlockCurveModel) or not model.is_ready:
+            return None
+        limit = float(self.params.snapshot()["low_sensitivity_g_per_raw"])
+        key = (id(model.raw_definition), limit)
+        if self._audit_cache is None or self._audit_cache[0] != key:
+            self._audit_cache = (key, audit_calibration(model.raw_definition, limit))
+        return self._audit_cache[1]
 
     def window_corrected(self) -> np.ndarray:
         """Média do RAW corrigido da manta inteira na janela de estabilidade."""
         frames = [m for _, m in list(self._full_window)]
+        return window_mean(frames, np.zeros((HID_ROWS, HID_COLS)))
+
+    def window_raw(self) -> np.ndarray:
+        """Média do RAW medido (sem baseline) da manta inteira na janela de estabilidade."""
+        frames = [m for _, m in list(self._full_raw_window)]
         return window_mean(frames, np.zeros((HID_ROWS, HID_COLS)))
 
     def stable_capture(self, min_frames: int = 3) -> tuple[np.ndarray, int, float] | None:
@@ -275,6 +328,7 @@ class AcquisitionWorker:
             self.state_machine.reset()
             self._raw_window.clear()
             self._full_window.clear()
+            self._full_raw_window.clear()
             self._capture_window.clear()
             self._auto_tare_done = True
 
@@ -291,6 +345,9 @@ class AcquisitionWorker:
         self._full_window.append((now, corrected_full.astype(np.float32)))
         while self._full_window and self._full_window[0][0] < now - p["stability_window_s"]:
             self._full_window.popleft()
+        self._full_raw_window.append((now, raw.astype(np.float32)))
+        while self._full_raw_window and self._full_raw_window[0][0] < now - p["stability_window_s"]:
+            self._full_raw_window.popleft()
         frame = WindowFrame(
             raw_mean=window_mean([m for _, m in self._raw_window], raw_measured),
             corrected_mean=window_mean(self.state_machine.window_frames, corrected),
@@ -303,6 +360,15 @@ class AcquisitionWorker:
         if state != ReadingState.SEM_CARGA and model is not None:
             estimate = model.estimate(frame)
 
+        # Diagnóstico célula a célula e por setor (orientações de 15/10). Roda também
+        # com a maca vazia, para medir a massa residual depois da tara.
+        summary: dict[str, Any] | None = None
+        if isinstance(model, BlockCurveModel) and model.is_ready:
+            cells = model.cell_diagnostics(frame.corrected_mean, raw_measured, p["saturation_raw"],
+                                           p["low_sensitivity_g_per_raw"])
+            summary = model.sector_summary(cells, self.active_blocks)
+        totals = summary["totals"] if summary else {}
+
         # Validação da medição
         n_saturated = saturated_cells(raw_measured, p["saturation_raw"])
         flags = QualityFlags(
@@ -313,8 +379,9 @@ class AcquisitionWorker:
             saturation=n_saturated > 0,
             missing_cells=missing or not connected,
             out_of_calibration=bool(estimate and estimate.out_of_calibration),
-            low_sensitivity=bool(estimate and estimate.low_sensitivity),
+            low_sensitivity=bool(estimate and (estimate.low_sensitivity or totals.get("n_low_sensitivity", 0) > 0)),
             model_valid=bool(estimate and estimate.model_valid and estimate.mass_kg is not None),
+            low_data_support=bool(estimate and totals.get("n_low_support", 0) > 0),
         )
         state = self.state_machine.set_validated(flags.weight_valid)
         stable_now = state in (ReadingState.ESTAVEL, ReadingState.MEDICAO_VALIDA) and not metrics.movement
@@ -349,6 +416,13 @@ class AcquisitionWorker:
         normalized_map = (display / max_val if max_val > 0 else display).tolist()
 
         tare_record = self.baseline.record
+        if (state == ReadingState.SEM_CARGA and summary is not None and tare_record is not None
+                and not self.baseline.is_collecting and connected and not missing):
+            self.residual.update(
+                tare_record.tare_id, now, totals["mass_kg"], totals["mass_without_gain_kg"],
+                {s["sector"]: s["mass_kg"] for s in summary["sectors"] if s["active"]},
+            )
+        audit = self.calibration_audit()
         last_valid_kg = self._last_valid["weight_kg"] if self._last_valid else None
         live = {
             "maca_id": self._maca_id,
@@ -389,6 +463,22 @@ class AcquisitionWorker:
             "center_y": round(features.center_y, 2),
             "spatial_dispersion": round(features.spatial_dispersion, 2),
             "saturated_cells": n_saturated,
+            # Diagnóstico da calibração (orientações de 15/10, item 8). L_s sem o ganho α_s;
+            # com a maca vazia valem como massa residual.
+            "n_digital_saturation": n_saturated,
+            "sector_local_mass_kg": {str(s["sector"]): s["local_mass_kg"] for s in summary["sectors"]} if summary else None,
+            "sector_mass_kg": {str(s["sector"]): s["mass_kg"] for s in summary["sectors"]} if summary else None,
+            "mass_without_gain_kg": totals.get("mass_without_gain_kg"),
+            "n_active_cells": totals.get("n_active_cells"),
+            "n_out_of_calibration": totals.get("n_out_of_calibration"),
+            "out_of_calibration_by_sector": (
+                {str(s["sector"]): s["cells_out_of_calibration"] for s in summary["sectors"]} if summary else None),
+            "out_of_calibration_mass_pct": totals.get("out_of_calibration_mass_pct"),
+            "n_low_sensitivity": totals.get("n_low_sensitivity"),
+            "n_low_support": totals.get("n_low_support"),
+            "hysteresis_up_minus_down_kg": totals.get("hysteresis_up_minus_down_kg"),
+            "residual_mass_empty": self.residual.snapshot(),
+            "calibration_alerts": audit["alerts"] if audit else [],
             # Postura e interface
             "heatmap": normalized_map,
             "cop": {"row": round(features.center_y, 2), "col": round(features.center_x, 2)},
