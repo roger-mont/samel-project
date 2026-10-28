@@ -70,6 +70,8 @@ FRAME_FIELDS = [
     "weight_status",
     "target_cell",
     "target_block",
+    "stale_sectors",
+    "max_sector_age_s",
 ]
 
 LOADING_DIRECTIONS = ("UP", "DOWN", "UNKNOWN")

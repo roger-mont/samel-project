@@ -38,6 +38,7 @@ class CalibrationParams:
     t_tare_s: float = 5.0                   # T_TARE: duração da aquisição da tara
     baseline_std_max_raw: float = 3.0       # desvio médio por célula aceito na tara (BASELINE_OK)
     auto_rezero_empty_s: float = 30.0       # tempo com maca vazia antes da tara automática
+    tare_empty_min_s: float = 3.0           # tara manual só com SEM_CARGA contínuo há pelo menos isto
 
     # Detecção de carga, estabilidade e movimento
     load_threshold_raw: float = 150.0       # soma corrigida acima da qual há carga
@@ -51,6 +52,10 @@ class CalibrationParams:
     # LOW_SENSITIVITY: célula em que 1 RAW vale mais que isto em gramas (dm/dRAW da curva).
     # Valor provisório, a ser definido nos ensaios; 0 desliga. Só informativo.
     low_sensitivity_g_per_raw: float = 10.0
+    # STALE_SECTOR: setor ativo sem atualização completa (256 células) há mais que isto.
+    # Valor provisório: medir o intervalo real em GET /api/v1/diagnostics/acquisition
+    # (update_interval_ms por setor) e ajustar; 0 desliga.
+    stale_sector_s: float = 1.0
 
     _lock: threading.Lock = field(
         default_factory=threading.Lock,

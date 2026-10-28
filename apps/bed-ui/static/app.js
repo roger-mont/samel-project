@@ -18,6 +18,9 @@
 
         // KPIs
         kpiWeightVal: document.getElementById("kpi-weight-val"),
+        kpiWeightCurrent: document.getElementById("kpi-weight-current"),
+        kpiWeightStatus: document.getElementById("kpi-weight-status"),
+        kpiWeightLast: document.getElementById("kpi-weight-last"),
         kpiStabilityFill: document.getElementById("kpi-stability-fill"),
         kpiStabilityText: document.getElementById("kpi-stability-text"),
         kpiStabilityStatus: document.getElementById("kpi-stability-status"),
@@ -348,6 +351,30 @@
         return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
     }
 
+    /* --- Status do peso --- */
+    const WEIGHT_STATUS_TEXT = {
+        NO_LOAD: "Sem carga",
+        LOAD_DETECTED: "Carga detectada",
+        STABILIZING: "Estabilizando",
+        MOVEMENT: "Movimento",
+        NOT_VALIDATED: "Não validado",
+        VALID: "Medição válida",
+    };
+
+    function weightReasons(data) {
+        const q = data.measurement_quality || {};
+        const reasons = [];
+        if (q.STALE_SECTOR) {
+            const s = (data.stale_sectors || []).join(", ");
+            reasons.push(s ? `setor ${s} sem atualização` : "setor sem atualização");
+        }
+        if (q.MISSING_CELLS) reasons.push("manta desconectada");
+        if (q.TARE_OK === false) reasons.push("sem tara");
+        if (q.SATURATION) reasons.push("célula saturada");
+        if (q.OUT_OF_CALIBRATION) reasons.push("fora da faixa calibrada");
+        return reasons;
+    }
+
     /* --- KPI Updater --- */
     function updateKPIs(data) {
         if (!data) return;
@@ -361,7 +388,8 @@
         const staticSecs = data.static_seconds !== undefined ? data.static_seconds : 0;
         const isAlert = Boolean(data.is_alert);
 
-        // KPI 1: Peso — nunca um número aparentemente preciso quando a leitura não é válida
+        // KPI 1: Peso validado, peso atual, status e último válido em campos separados
+        // (parecer de 20/10, item 6): o último válido nunca aparece como a medição corrente.
         let weightText = "—";
         let headerText = "Sem carga";
         if (weightKg !== null) {
@@ -369,12 +397,27 @@
             headerText = `${weightKg.toFixed(2)} kg`;
         } else if (weightStatus !== "NO_LOAD") {
             weightText = "Não validado";
-            headerText = lastValidKg !== null
-                ? `PESO NÃO VALIDADO — último válido: ${lastValidKg.toFixed(2)} kg`
-                : "PESO NÃO VALIDADO — AGUARDANDO ESTABILIZAÇÃO";
+            headerText = "Não validado";
         }
         if (DOM.kpiWeightVal) DOM.kpiWeightVal.textContent = weightText;
         if (DOM.patientWeightHeader) DOM.patientWeightHeader.textContent = headerText;
+
+        const currentKg = typeof data.estimated_mass_kg === "number" ? data.estimated_mass_kg : null;
+        if (DOM.kpiWeightCurrent) {
+            DOM.kpiWeightCurrent.textContent = currentKg === null ? "—"
+                : `${currentKg.toFixed(2)} kg${isLocked ? "" : " (não validado)"}`;
+        }
+        if (DOM.kpiWeightStatus) {
+            const reasons = weightReasons(data);
+            const label = WEIGHT_STATUS_TEXT[weightStatus] || weightStatus;
+            DOM.kpiWeightStatus.textContent = reasons.length && !isLocked ? `${label} · ${reasons.join(", ")}` : label;
+            DOM.kpiWeightStatus.classList.toggle("warn", !isLocked && weightStatus !== "NO_LOAD");
+        }
+        if (DOM.kpiWeightLast) {
+            const lv = data.last_valid;
+            const when = lv && lv.timestamp ? new Date(lv.timestamp).toLocaleTimeString("pt-BR") : "";
+            DOM.kpiWeightLast.textContent = lastValidKg === null ? "—" : `${lastValidKg.toFixed(2)} kg${when ? ` às ${when}` : ""}`;
+        }
 
         const stateId = data.state_id || "SEM_CARGA";
 

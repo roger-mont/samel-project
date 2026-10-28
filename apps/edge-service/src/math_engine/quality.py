@@ -8,6 +8,9 @@ SATURATION é só a saturação digital (RAW no limite do conversor). LOW_SENSIT
 (dm/dRAW alto: limite metrológico) e LOW_DATA_SUPPORT (célula no trecho entre 0 e o
 primeiro nó de um setor em que a menor massa deu RAW 0) são flags separadas e
 informativas (orientações de 15/10, itens 3.2 e 4).
+
+STALE_SECTOR: algum setor ativo não recebeu atualização completa dentro do limite
+(parecer de 20/10, item 2). Invalida o peso: um setor congelado não pode parecer válido.
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ class QualityFlags:
     low_sensitivity: bool
     model_valid: bool
     low_data_support: bool = False
+    stale_sector: bool = False
 
     @property
     def weight_valid(self) -> bool:
@@ -38,6 +42,7 @@ class QualityFlags:
             and not self.movement
             and not self.saturation
             and not self.missing_cells
+            and not self.stale_sector
             and not self.out_of_calibration
             and self.model_valid
         )

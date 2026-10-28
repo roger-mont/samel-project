@@ -11,9 +11,13 @@ alertas de qualidade da calibração.
 - Histerese: erro da curva UP nos patamares DOWN (validation).
 - Baixa sensibilidade: maior g por RAW entre nós.
 - Setor representado por uma célula só.
+- CSVs de calibração idênticos (mesmo SHA-1 em 'sources'), como 12X34 e 13X26
+  (parecer de 20/10, item 7). Só alerta: a decisão de manter ou refazer o ensaio
+  é da equipe.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
 import numpy as np
@@ -60,6 +64,18 @@ def audit_calibration(definition: dict[str, Any], low_sensitivity_g_per_raw: flo
     sources = definition.get("sources", []) or []
     sectors: dict[str, Any] = {}
     alerts: list[str] = []
+    by_digest: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for s in sources:
+        if s.get("sha1"):
+            by_digest[s["sha1"]].append(s)
+    duplicates = [
+        {"sha1": digest, "cells": [s.get("cell") for s in group], "sectors": [s.get("block") for s in group],
+         "files": [s.get("file") for s in group]}
+        for digest, group in by_digest.items() if len(group) > 1
+    ]
+    for d in duplicates:
+        alerts.append(f"CSVs de calibração idênticos (SHA-1 {d['sha1'][:10]}): células "
+                      f"{', '.join(map(str, d['cells']))}, setores {', '.join(map(str, d['sectors']))}.")
     for bid_str, b in sorted(definition.get("blocks", {}).items(), key=lambda kv: int(kv[0])):
         fit = b.get("fit", []) or []
         used = (isotonic_correction([f["mass_kg"] for f in fit], [f["raw_mean"] for f in fit],
@@ -124,5 +140,6 @@ def audit_calibration(definition: dict[str, Any], low_sensitivity_g_per_raw: flo
             "low_sensitivity_g_per_raw": low_sensitivity_g_per_raw,
         },
         "sectors": sectors,
+        "duplicate_sources": duplicates,
         "alerts": alerts,
     }

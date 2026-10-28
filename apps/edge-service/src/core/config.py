@@ -69,6 +69,9 @@ class ConfigManager:
             "acquisition": {},
             # Blocos 16×16 que entram na medição (estados, modelo, saturação)
             "active_blocks": [1, 2, 3, 4, 5, 6, 7, 8],
+            # Log de diagnóstico contínuo em data/diagnostics (parecer de 20/10): uma linha a
+            # cada interval_s (0 desliga), um CSV por dia, compactado e apagado após retention_days
+            "diagnostic_log": {"interval_s": 0.5, "retention_days": 7},
         }
         self.reload()
 

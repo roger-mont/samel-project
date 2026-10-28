@@ -41,6 +41,7 @@ logging.basicConfig(
 logger = logging.getLogger("edge_server")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+_DIAGNOSTICS_DIR = Path(__file__).resolve().parents[2] / "data" / "diagnostics"
 _comparison_cache = ComparisonCache()
 
 
@@ -114,6 +115,11 @@ class ExperimentMarkPayload(BaseModel):
     known_mass_g: float | None = Field(default=None, ge=0.0)
     loading_direction: str | None = Field(default=None, description="UP | DOWN | UNKNOWN")
     target_cell: str | None = Field(default=None, description="Célula ensaiada, 'linha x coluna' (ex.: 12x34); '' limpa")
+
+
+class ReferenceMassPayload(BaseModel):
+    mass_kg: float | None = Field(default=None, ge=0.0, le=500.0, description="Massa real sobre a maca; null limpa")
+    note: str | None = Field(default=None, max_length=80, description="Ex.: centro, cabeceira, pessoa sentada")
 
 
 # -----------------------------------------------------------------------------
@@ -205,6 +211,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         db=db,
         maca_id=MACA_ID,
         broadcast_callback=_threadsafe_ws_broadcast,
+        diagnostics_dir=_DIAGNOSTICS_DIR,
     )
 
     app.state.db = db
@@ -266,10 +273,20 @@ def get_live_telemetry(request: Request) -> dict[str, Any]:
 
 @app.post("/api/v1/calibration/tare", tags=["Calibração"])
 def trigger_tare(request: Request) -> dict[str, Any]:
-    """Inicia uma tara de T_TARE segundos. A maca precisa estar vazia."""
+    """Inicia uma tara de T_TARE segundos. Recusada (409, com o motivo) se a maca não estiver
+    em SEM_CARGA contínuo há tare_empty_min_s, se houver movimento, setor sem atualização ou
+    manta desconectada. Durante a coleta, esses mesmos motivos cancelam a tara."""
     acq = _get_acq(request.app)
-    acq.trigger_tare()
+    result = acq.trigger_tare()
+    if not result["accepted"]:
+        raise HTTPException(status_code=409, detail=f"Tara recusada: {result['reason']}")
     return {"status": "ok", "message": "Amostragem de tara iniciada", "tare": acq.tare_status()}
+
+
+@app.get("/api/v1/calibration/tare/events", tags=["Calibração"])
+def get_tare_events(request: Request) -> dict[str, Any]:
+    """Taras iniciadas, concluídas, recusadas e canceladas, com o motivo (mais recente por último)."""
+    return {"events": list(_get_acq(request.app).tare_events)}
 
 
 @app.get("/api/v1/calibration/tare", tags=["Calibração"])
@@ -495,8 +512,8 @@ async def telemetry_websocket(websocket: WebSocket) -> None:
                     await websocket.send_text(json.dumps({"type": "PONG", "timestamp": datetime.now(timezone.utc).isoformat()}))
                 elif msg_type == "tare":
                     acq = _get_acq(websocket.app)
-                    acq.trigger_tare()
-                    await websocket.send_text(json.dumps({"type": "ACK", "action": "tare"}))
+                    result = acq.trigger_tare()
+                    await websocket.send_text(json.dumps({"type": "ACK", "action": "tare", **result}))
             except Exception:
                 pass
     except WebSocketDisconnect:
@@ -871,6 +888,51 @@ def get_calibration_audit(request: Request) -> dict[str, Any]:
     if audit is None:
         raise HTTPException(status_code=409, detail="Modelo ativo não é a curva por bloco")
     return audit
+
+
+# -----------------------------------------------------------------------------
+# Diagnóstico da aquisição (parecer de 20/10/2026)
+# -----------------------------------------------------------------------------
+
+@app.get("/api/v1/diagnostics/acquisition", tags=["Diagnóstico"])
+def get_acquisition_diagnostics(request: Request) -> dict[str, Any]:
+    """Pacotes por setor (total e por segundo), idade da última atualização completa, varreduras
+    incompletas (indício de pacote perdido), intervalo real entre atualizações (p50/p95/máx, para
+    ajustar stale_sector_s) e os setores em STALE_SECTOR (itens 1 a 3)."""
+    return _get_acq(request.app).acquisition_report()
+
+
+@app.get("/api/v1/diagnostics/baseline-return", tags=["Diagnóstico"])
+def get_baseline_return(request: Request) -> dict[str, Any]:
+    """Depois de retirar a carga: por setor, células que não voltaram à tara, separando as que
+    recebem valores novos (memória/creep) das que não recebem pacote (falha de atualização) (item 4)."""
+    return _get_acq(request.app).baseline_return.snapshot()
+
+
+@app.post("/api/v1/diagnostics/baseline-return/start", tags=["Diagnóstico"])
+def start_baseline_return(request: Request) -> dict[str, Any]:
+    """Marca "carga retirada agora": acompanha o retorno por 10 min sem depender do estado da leitura."""
+    acq = _get_acq(request.app)
+    acq.baseline_return.start_manual()
+    return {"status": "ok"}
+
+
+@app.get("/api/v1/diagnostics/log", tags=["Diagnóstico"])
+def get_diagnostic_log(request: Request) -> dict[str, Any]:
+    """Situação do log de diagnóstico contínuo (pasta, arquivos, linhas gravadas, massa de referência)."""
+    log = _get_acq(request.app).diag_log
+    if log is None:
+        raise HTTPException(status_code=409, detail="Log de diagnóstico desativado")
+    return log.status()
+
+
+@app.post("/api/v1/diagnostics/reference", tags=["Diagnóstico"])
+def set_reference_mass(payload: ReferenceMassPayload, request: Request) -> dict[str, Any]:
+    """Massa de referência sobre a maca, gravada em cada linha do log (teste decisivo, item 5)."""
+    log = _get_acq(request.app).diag_log
+    if log is None:
+        raise HTTPException(status_code=409, detail="Log de diagnóstico desativado")
+    return {"reference": log.set_reference(payload.mass_kg, payload.note)}
 
 
 @app.get("/calibracao", include_in_schema=False)

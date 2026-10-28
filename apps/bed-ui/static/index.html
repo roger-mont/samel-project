@@ -69,7 +69,7 @@
                         <span class="patient-field-value" id="patient-age">68 anos</span>
                     </div>
                     <div class="patient-field highlight">
-                        <span class="patient-field-label">Peso Estimado Atual</span>
+                        <span class="patient-field-label">Peso Validado</span>
                         <span class="patient-field-value" id="patient-weight-header">64.50 kg</span>
                     </div>
                 </section>
@@ -79,7 +79,7 @@
                     <!-- KPI 1: Peso Estimado -->
                     <div class="kpi-card kpi-weight" id="card-weight">
                         <div class="kpi-header">
-                            <span class="kpi-label">Peso Estimado</span>
+                            <span class="kpi-label">Peso Validado</span>
                             <div class="kpi-icon-wrapper">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                             </div>
@@ -90,6 +90,12 @@
                                 <span class="kpi-unit">kg</span>
                             </div>
                         </div>
+                        <!-- Peso atual, status e último válido separados: o último válido nunca aparece como medição corrente -->
+                        <dl class="weight-breakdown">
+                            <div><dt>Peso atual</dt><dd id="kpi-weight-current">—</dd></div>
+                            <div><dt>Status</dt><dd id="kpi-weight-status">—</dd></div>
+                            <div><dt>Último válido</dt><dd id="kpi-weight-last">—</dd></div>
+                        </dl>
                         <div class="kpi-footer">
                             <div class="stability-bar-container">
                                 <div class="stability-bar-fill" id="kpi-stability-fill" style="width: 100%;"></div>

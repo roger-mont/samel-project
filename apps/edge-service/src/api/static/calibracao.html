@@ -222,16 +222,20 @@
     <p class="lead">Cada célula passa pela curva do seu setor (massa local); a massa do setor é α<sub>s</sub> × a soma das células. Média da janela de estabilidade, atualizada a cada 0,5 s.</p>
     <div class="status">
       <div>
-        <div class="small">Massa estimada (setores ativos)</div>
+        <div class="small">Peso atual (estimativa, setores ativos)</div>
         <div class="hero" id="total">—</div>
       </div>
       <div>
-        <div class="small">Estado da leitura</div>
+        <div class="small">Status</div>
         <div id="state">—</div>
       </div>
       <div>
         <div class="small">Peso validado</div>
         <div id="valid">—</div>
+      </div>
+      <div>
+        <div class="small">Último peso válido</div>
+        <div id="last-valid">—</div>
       </div>
     </div>
     <div class="live">
@@ -276,6 +280,45 @@
       <div class="table-scroll"><table id="cells-table"></table></div>
     </details>
     <p class="small err" id="diag-error"></p>
+  </section>
+
+  <section class="card wide" id="acq-card">
+    <h2>Diagnóstico da aquisição (parecer de 20/10)</h2>
+    <p class="lead">Mostra se os 2.048 dados chegam íntegros ao cálculo: idade da última atualização completa de cada setor, pacotes por segundo,
+      varreduras incompletas (indício de pacote perdido) e a tara em vigor, junto com L1…L8. Um setor sem atualização dentro do limite vira
+      STALE_SECTOR e impede o peso validado. Tudo isto também vai para o log contínuo em <code>data/diagnostics/</code>.</p>
+    <div class="kv" id="acq-kv">—</div>
+    <div class="kv" id="acq-flags"></div>
+    <div class="table-scroll"><table id="acq-table"></table></div>
+    <p class="small">Regra de diagnóstico: carga no tronco no mapa, mas L2/L3/L6/L7 caindo ou perto de zero com a idade desses setores crescendo,
+      aponta para a aquisição. Todos os setores atualizados e contribuindo, com o peso mudando com a posição e mais células fora da faixa,
+      aponta para a calibração.</p>
+    <div class="fit-grid" style="margin-top:12px">
+      <div style="min-width:0">
+        <h3 style="font-size:14px;margin:0 0 6px">Teste decisivo: massa de referência no log</h3>
+        <p class="small">Informe a massa real sobre a maca (pessoa ou carga distribuída) e a posição. Ela vai em cada linha do log até ser limpa.</p>
+        <div class="controls">
+          <input type="number" id="ref-kg" min="0" max="500" step="0.1" placeholder="kg" aria-label="Massa de referência em kg" style="width:90px">
+          <input type="text" id="ref-note" maxlength="80" placeholder="posição / observação" aria-label="Observação" style="width:180px">
+          <button type="button" class="action" id="ref-save">Gravar referência</button>
+          <button type="button" class="action link" id="ref-clear">Limpar</button>
+        </div>
+        <div class="kv" id="log-kv">—</div>
+        <h3 style="font-size:14px;margin:12px 0 6px">Eventos de tara</h3>
+        <div class="table-scroll"><table id="tare-events"></table></div>
+      </div>
+      <div style="min-width:0">
+        <h3 style="font-size:14px;margin:0 0 6px">Retorno ao baseline</h3>
+        <p class="small">Aplique e retire carga num setor conhecido e clique logo depois de retirar. Células que ficam acima da tara recebendo valores
+          novos indicam memória/creep do sensor; acima da tara sem receber pacote indicam falha de atualização. Começa sozinho quando a maca volta a vazia.</p>
+        <div class="controls">
+          <button type="button" class="action" id="br-start">Carga retirada agora</button>
+          <span class="small" id="br-msg"></span>
+        </div>
+        <div class="table-scroll"><table id="br-table"></table></div>
+      </div>
+    </div>
+    <p class="small err" id="acq-error"></p>
   </section>
 
   <section class="card wide" id="gain-card">
@@ -782,6 +825,7 @@
     if (q.MOVEMENT) reasons.push("movimento");
     if (q.SATURATION) reasons.push("célula saturada");
     if (q.MISSING_CELLS) reasons.push("manta desconectada");
+    if (q.STALE_SECTOR) reasons.push("setor sem atualização");
     if (q.OUT_OF_CALIBRATION) reasons.push("célula acima da faixa calibrada");
     if (q.MODEL_VALID === false) reasons.push("sem estimativa do modelo");
     return reasons;
@@ -796,6 +840,10 @@
     document.getElementById("valid").innerHTML = data.weight_kg != null
       ? `<span style="color:var(--good)">●</span> ${massText(data.weight_kg)}`
       : `não validado<span class="small"> · ${reasons.join(", ") || "sem carga"}</span>`;
+    const lv = data.last_valid;
+    document.getElementById("last-valid").innerHTML = lv
+      ? `${massText(lv.weight_kg)}<span class="small"> · às ${new Date(lv.timestamp).toLocaleTimeString("pt-BR")}</span>`
+      : "—";
   }
 
   async function poll() {
@@ -803,7 +851,7 @@
       const r = await fetch("/api/v1/calibration/extraction", { cache: "no-store" });
       if (!r.ok) throw new Error(`extração: HTTP ${r.status}`);
       last = await r.json();
-      drawHeat(last); drawSectors(last); drawStatus(last); drawGainLive(); drawDiag(last);
+      drawHeat(last); drawSectors(last); drawStatus(last); drawGainLive(); drawDiag(last); drawAcq(last);
       document.getElementById("live-error").textContent = "";
     } catch (e) {
       document.getElementById("live-error").textContent = `Sem leitura do edge-service: ${e.message}`;
@@ -850,6 +898,127 @@
       metric("Histerese UP − DOWN", t.hysteresis_up_minus_down_kg == null ? "—" : signedMass(t.hysteresis_up_minus_down_kg), "mesma leitura pela curva de descida");
     drawResidual(data.residual_mass_empty);
   }
+
+  // ------------------------------------------------- diagnóstico da aquisição
+  const ms = (s) => s == null ? "—" : `${fmt(s * 1000)} ms`;
+  const flagChip = (name, on, bad = true) => `<span class="pill ${on ? (bad ? "bad" : "ok") : "idle"}">${name}</span>`;
+
+  function drawAcq(data) {
+    const acq = data.acquisition, q = data.measurement_quality || {}, t = data.tare;
+    const stale = new Set((data.stale_sectors || []).map(String));
+    D("acq-flags").innerHTML =
+      flagChip("STALE_SECTOR", q.STALE_SECTOR) + flagChip("MISSING_CELLS", q.MISSING_CELLS) +
+      flagChip("OUT_OF_CALIBRATION", q.OUT_OF_CALIBRATION) + flagChip("MOVIMENTO", q.MOVEMENT) +
+      flagChip("ESTÁVEL", q.SIGNAL_STABLE, false) + flagChip("WEIGHT_VALID", q.WEIGHT_VALID, false);
+    const tareText = t
+      ? `<span>tara <b>${esc(t.tare_id.slice(0, 8))}</b> às <b>${new Date(t.timestamp_tare).toLocaleString("pt-BR")}</b>${t.automatic ? " (automática)" : ""}</span>` +
+        `<span>baseline_sum <b>${fmt(t.baseline_sum, 1)}</b></span>`
+      : "<span>sem tara</span>";
+    if (!acq) {
+      D("acq-kv").innerHTML = `${tareText}<span>o leitor em uso não informa pacotes por setor</span>`;
+    } else {
+      D("acq-kv").innerHTML = `<span>fonte <b>${esc(acq.source)}</b></span>` +
+        `<span>pacotes/s <b>${acq.packets_per_s == null ? "—" : fmt(acq.packets_per_s, 0)}</b></span>` +
+        `<span>erros de leitura <b>${fmt(acq.read_errors)}</b></span><span>reconexões <b>${fmt(acq.reconnects)}</b></span>` +
+        `<span>limite STALE <b>${data.stale_sector_s > 0 ? ms(data.stale_sector_s) : "desligado"}</b></span>` + tareText;
+    }
+    const sectors = {};
+    (data.sectors || []).forEach(s => { sectors[String(s.sector)] = s; });
+    const ids = ["1", "2", "3", "4", "5", "6", "7", "8"];
+    const row = (label, f) => `<tr><td>${label}</td>${ids.map(id => `<td${stale.has(id) ? ' class="err"' : ""}>${f(id)}</td>`).join("")}</tr>`;
+    const a = (id) => (acq && acq.sectors[id]) || {};
+    D("acq-table").innerHTML =
+      `<tr><th>Setor</th>${ids.map(id => `<th${stale.has(id) ? ' class="err"' : ""}>${id}${stale.has(id) ? " ▲" : ""}</th>`).join("")}</tr>` +
+      row("L<sub>s</sub> (sem α)", id => sectors[id] ? massText(sectors[id].local_mass_kg ?? sectors[id].mass_kg) : "—") +
+      row("Σ RAW corrigido", id => sectors[id] ? fmt(sectors[id].raw_sum, 0) : "—") +
+      row("Células ativas", id => sectors[id] ? fmt(sectors[id].active_cells) : "—") +
+      row("Fora da faixa", id => sectors[id] ? fmt(sectors[id].cells_out_of_calibration) : "—") +
+      row("Idade da atualização", id => ms(a(id).age_s)) +
+      row("Último pacote", id => ms(a(id).last_packet_age_s)) +
+      row("Pacotes/s", id => a(id).packets_per_s == null ? "—" : fmt(a(id).packets_per_s, 0)) +
+      row("Atualizações/s", id => a(id).updates_per_s == null ? "—" : fmt(a(id).updates_per_s, 1)) +
+      row("Intervalo p95", id => a(id).update_interval_ms && a(id).update_interval_ms.p95 != null ? `${fmt(a(id).update_interval_ms.p95)} ms` : "—") +
+      row("Varreduras incompletas", id => a(id).incomplete_sweeps == null ? "—" : fmt(a(id).incomplete_sweeps));
+  }
+
+  const VERDICT_TEXT = {
+    VOLTOU_A_TARA: "voltou à tara", MEMORIA_OU_CREEP: "memória/creep", SEM_ATUALIZACAO: "sem atualização",
+    RESIDUO_SEM_TELEMETRIA: "resíduo (sem telemetria)",
+  };
+
+  function drawBaselineReturn(br) {
+    if (!br || br.waiting || !br.sectors) {
+      D("br-table").innerHTML = "";
+      D("br-msg").textContent = br && br.running ? "Acompanhando…" : "Esperando a carga ser retirada.";
+      return;
+    }
+    D("br-msg").textContent = `${fmt(br.since_unload_s, 0)} s desde a retirada${br.manual ? " (marcada)" : ""}${br.running ? "" : " · encerrado"}`;
+    const ids = Object.keys(br.sectors).sort();
+    const row = (label, f) => `<tr><td>${label}</td>${ids.map(id => `<td>${f(br.sectors[id])}</td>`).join("")}</tr>`;
+    D("br-table").innerHTML = `<tr><th>Setor</th>${ids.map(id => `<th>${id}</th>`).join("")}</tr>` +
+      row("Situação", s => s.verdict === "VOLTOU_A_TARA" ? VERDICT_TEXT[s.verdict]
+        : `<span class="err">${VERDICT_TEXT[s.verdict] || s.verdict}</span>`) +
+      row("Células acima da tara", s => fmt(s.residual_cells)) +
+      row("… sem atualização", s => s.cells_not_updated == null ? "—" : fmt(s.cells_not_updated)) +
+      row("Σ RAW residual", s => fmt(s.residual_raw_sum, 0)) +
+      row("Σ RAW na retirada", s => fmt(s.residual_raw_sum_at_unload, 0));
+  }
+
+  const TARE_EVENT_TEXT = { iniciada: "iniciada", concluida: "concluída", rejeitada: "recusada", cancelada: "cancelada" };
+
+  function drawTareEvents(events) {
+    const last = (events || []).slice(-6).reverse();
+    D("tare-events").innerHTML = last.length
+      ? `<tr><th>Hora</th><th style="text-align:left">Evento</th><th style="text-align:left">Motivo</th></tr>` +
+        last.map(e => `<tr><td>${new Date(e.timestamp).toLocaleTimeString("pt-BR")}</td>` +
+          `<td style="text-align:left"${e.event === "rejeitada" || e.event === "cancelada" ? ' class="err"' : ""}>` +
+          `${TARE_EVENT_TEXT[e.event] || e.event}${e.automatic ? " (auto)" : ""}</td>` +
+          `<td style="text-align:left;white-space:normal">${esc(e.reason || (e.baseline_sum != null ? `baseline_sum ${fmt(e.baseline_sum, 1)}` : ""))}</td></tr>`).join("")
+      : `<tr><td>Nenhum evento desde que o serviço subiu.</td></tr>`;
+  }
+
+  function drawLog(log) {
+    if (!log) { D("log-kv").innerHTML = "<span>log de diagnóstico desativado</span>"; return; }
+    const ref = log.reference;
+    D("log-kv").innerHTML = `<span>arquivo <b>${esc(log.current_file || "—")}</b></span>` +
+      `<span>linhas <b>${fmt(log.rows_written)}</b> (a cada ${fmt(log.interval_s, 2)} s)</span>` +
+      `<span>referência <b>${ref ? `${fmt(ref.mass_kg, 1)} kg${ref.note ? ` · ${esc(ref.note)}` : ""}` : "nenhuma"}</b></span>` +
+      (log.error ? `<span class="err">${esc(log.error)}</span>` : "");
+  }
+
+  async function pollAcq() {
+    try {
+      const [br, ev, log] = await Promise.all([
+        fetch("/api/v1/diagnostics/baseline-return", { cache: "no-store" }).then(r => r.json()),
+        fetch("/api/v1/calibration/tare/events", { cache: "no-store" }).then(r => r.json()),
+        fetch("/api/v1/diagnostics/log", { cache: "no-store" }).then(r => r.ok ? r.json() : null),
+      ]);
+      drawBaselineReturn(br); drawTareEvents(ev.events); drawLog(log);
+      D("acq-error").textContent = "";
+    } catch (e) {
+      D("acq-error").textContent = `Sem diagnóstico da aquisição: ${e.message}`;
+    } finally {
+      setTimeout(pollAcq, 2000);
+    }
+  }
+
+  D("br-start").addEventListener("click", async () => {
+    try { await api("POST", "/api/v1/diagnostics/baseline-return/start"); D("br-msg").textContent = "Acompanhando…"; }
+    catch (e) { D("br-msg").textContent = e.message; }
+  });
+
+  async function setReference(kg) {
+    try {
+      await api("POST", "/api/v1/diagnostics/reference", { mass_kg: kg, note: kg == null ? null : (D("ref-note").value || null) });
+      drawLog(await api("GET", "/api/v1/diagnostics/log"));
+    } catch (e) { D("acq-error").textContent = e.message; }
+  }
+  D("ref-save").addEventListener("click", () => {
+    const kg = parseFloat(D("ref-kg").value);
+    if (!(kg >= 0)) { D("acq-error").textContent = "Informe a massa de referência em kg."; return; }
+    setReference(kg);
+  });
+  D("ref-clear").addEventListener("click", () => { D("ref-kg").value = ""; D("ref-note").value = ""; setReference(null); });
 
   function drawResidual(r) {
     if (!r) return;
@@ -1136,8 +1305,9 @@
         drawGainLive();
         if (!tareInfo.collecting) break;
       }
-      const rec = tareInfo.record;
+      const rec = tareInfo.record, ev = tareInfo.last_event;
       if (tareInfo.collecting) say("tare-msg", "A tara ainda não terminou. Confira se a manta está conectada.", false);
+      else if (ev && (ev.event === "cancelada" || ev.event === "rejeitada")) say("tare-msg", `Tara ${ev.event}: ${ev.reason}`, false);
       else say("tare-msg", `Tara feita: ${rec.n_frames} frames, ruído médio ${fmt(rec.baseline_std, 3)} RAW.`, tareInfo.baseline_ok);
       await loadGain();
     } catch (e) {
@@ -1343,7 +1513,7 @@
   }
 
   loadCurves().catch(e => { document.getElementById("curve-lead").innerHTML = `<span class="err">${e.message}</span>`; })
-    .finally(() => { poll(); pollCmp(); pollCells(); loadAudit(); });
+    .finally(() => { poll(); pollCmp(); pollCells(); loadAudit(); pollAcq(); });
   Promise.all([loadGain(), loadTare()]).catch(e => { G("gain-status").innerHTML = `<span class="err">Ganhos: ${e.message}</span>`; });
 })();
 </script>

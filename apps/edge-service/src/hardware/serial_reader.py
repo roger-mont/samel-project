@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
 
@@ -18,8 +19,15 @@ except ImportError:
     hid = None  # type: ignore[assignment]
 
 from core.settings import HID_VID, HID_PID, HID_ROWS, HID_COLS, HID_PACKET_SIZE
+from hardware.acquisition_stats import AcquisitionSample, AcquisitionStats
+from storage.calibration_store import BLOCK_REGIONS
 
 logger = logging.getLogger(__name__)
+
+# Setor de cada bloco 16×16 da matriz: _SECTOR_GRID[linha // 16][coluna // 16]
+_SECTOR_GRID: list[list[int]] = [[0] * (HID_COLS // 16) for _ in range(HID_ROWS // 16)]
+for _bid, (_rows, _cols) in BLOCK_REGIONS.items():
+    _SECTOR_GRID[_rows.start // 16][_cols.start // 16] = _bid
 
 
 class BaseFrameReader(ABC):
@@ -37,6 +45,10 @@ class BaseFrameReader(ABC):
     def close(self) -> None:
         """Libera recursos do driver."""
 
+    def acquisition_sample(self, now: float | None = None) -> AcquisitionSample | None:
+        """Telemetria por setor (pacotes, idade, perdas). None quando o leitor não a fornece."""
+        return None
+
 
 class FakeSerialReader(BaseFrameReader):
     """Gerador de dados sintéticos para desenvolvimento e testes sem hardware."""
@@ -46,6 +58,7 @@ class FakeSerialReader(BaseFrameReader):
         self._last_change = time.monotonic()
         self._center = self._random_center()
         self._connected = True
+        self.stats = AcquisitionStats("simulado")
 
     def _random_center(self) -> tuple[float, float]:
         rng = np.random.default_rng()
@@ -56,6 +69,9 @@ class FakeSerialReader(BaseFrameReader):
 
     def is_connected(self) -> bool:
         return self._connected
+
+    def acquisition_sample(self, now: float | None = None) -> AcquisitionSample:
+        return self.stats.sample(now)
 
     def read_frame(self) -> np.ndarray:
         now = time.monotonic()
@@ -77,6 +93,7 @@ class FakeSerialReader(BaseFrameReader):
         matrix = np.clip(gaussian + noise, 0, 255).astype(np.float64)
 
         time.sleep(0.025)  # 40 Hz
+        self.stats.on_full_frame(time.monotonic())
         return matrix
 
     def close(self) -> None:
@@ -84,9 +101,18 @@ class FakeSerialReader(BaseFrameReader):
 
 
 class HidFrameReader(BaseFrameReader):
-    """Leitura de alta fidelidade via USB HID (Manta WangYing VID=6860, PID=6733)."""
+    """Leitura de alta fidelidade via USB HID (Manta WangYing VID=6860, PID=6733).
 
-    _RENDER_INTERVAL_S: float = 0.025  # 40 Hz estável
+    A leitura USB roda numa thread própria, separada do processamento (parecer de
+    20/10, item 3): o consumidor pesado não bloqueia a aquisição e o buffer HID do
+    sistema não transborda enquanto o worker calcula. read_frame() só copia o mapa
+    persistente no ritmo do consumidor. Cada pacote alimenta a telemetria por setor
+    (self.stats), usada na flag STALE_SECTOR.
+    """
+
+    _RENDER_INTERVAL_S: float = 0.025  # ritmo do consumidor, não a taxa real da manta
+    _READ_TIMEOUT_MS: int = 50
+    _RECONNECT_WAIT_S: float = 0.5
 
     def __init__(self, vid: int = HID_VID, pid: int = HID_PID) -> None:
         if hid is None:
@@ -94,15 +120,20 @@ class HidFrameReader(BaseFrameReader):
         self._vid = vid
         self._pid = pid
         self._device: hid.device | None = None
+        self._lock = threading.Lock()
         self._persistent_map = np.zeros((HID_ROWS, HID_COLS), dtype=np.float64)
         self._max_seen: int = 0
+        self._last_frame_t = time.monotonic()
+        self.stats = AcquisitionStats("usb_hid")
         self._connect()
+        self._running = True
+        self._rx_thread = threading.Thread(target=self._rx_loop, name="HidRxThread", daemon=True)
+        self._rx_thread.start()
 
     def _connect(self) -> None:
         try:
             device = hid.device()
             device.open(self._vid, self._pid)
-            device.set_nonblocking(True)
             self._device = device
             logger.info("USB HID conectado com sucesso: VID=0x%04X PID=0x%04X", self._vid, self._pid)
         except Exception as err:
@@ -112,37 +143,57 @@ class HidFrameReader(BaseFrameReader):
     def is_connected(self) -> bool:
         return self._device is not None
 
+    def acquisition_sample(self, now: float | None = None) -> AcquisitionSample:
+        return self.stats.sample(now)
+
     def read_frame(self) -> np.ndarray:
-        frame_start = time.monotonic()
-
-        if not self.is_connected():
-            self._connect()
-
-        if self.is_connected():
-            self._drain_hid_buffer()
-
-        elapsed = time.monotonic() - frame_start
-        remaining = self._RENDER_INTERVAL_S - elapsed
+        remaining = self._RENDER_INTERVAL_S - (time.monotonic() - self._last_frame_t)
         if remaining > 0:
             time.sleep(remaining)
+        self._last_frame_t = time.monotonic()
+        with self._lock:
+            return self._persistent_map.copy()
 
-        return self._persistent_map.copy()
-
-    def _drain_hid_buffer(self) -> None:
-        try:
-            while True:
-                raw = self._device.read(HID_PACKET_SIZE)  # type: ignore[union-attr]
-                if not raw:
+    def _rx_loop(self) -> None:
+        """Lê pacotes sem parar e aplica no mapa persistente; reconecta se a manta cair."""
+        while self._running:
+            device = self._device
+            if device is None:
+                time.sleep(self._RECONNECT_WAIT_S)
+                if not self._running:
                     break
-                self._parse_hid_packet(bytes(raw), self._persistent_map)
-        except Exception as err:
-            logger.warning("Erro de leitura USB HID: %s", err)
-            self._device = None
+                self._connect()
+                if self._device is not None:
+                    self.stats.on_reconnect()
+                continue
+            try:
+                raw = device.read(HID_PACKET_SIZE, self._READ_TIMEOUT_MS)
+            except Exception as err:
+                logger.warning("Erro de leitura USB HID: %s", err)
+                self.stats.on_read_error()
+                self._device = None
+                continue
+            if raw:
+                self._handle_packet(bytes(raw), time.monotonic())
 
-    def _parse_hid_packet(self, data: bytes, matrix: np.ndarray) -> None:
+    def _handle_packet(self, data: bytes, now: float) -> None:
+        with self._lock:
+            sector, local_cells, rows, cols = self._parse_hid_packet(data, self._persistent_map)
+        if sector is None:
+            self.stats.on_ignored_packet()
+        else:
+            self.stats.on_packet(sector, local_cells, rows, cols, now)
+
+    def _parse_hid_packet(
+        self, data: bytes, matrix: np.ndarray,
+    ) -> tuple[int | None, list[int], list[int], list[int]]:
+        """Aplica o pacote no mapa e devolve o setor e as células recebidas (índice local 0-255 e posição)."""
         block_id = data[0]
+        local_cells: list[int] = []
+        rows: list[int] = []
+        cols: list[int] = []
         if block_id == 0:
-            return
+            return None, local_cells, rows, cols
 
         for i in range(1, len(data) - 1, 3):
             if i + 2 >= len(data):
@@ -170,8 +221,18 @@ class HidFrameReader(BaseFrameReader):
 
             if 0 <= x < HID_ROWS and 0 <= y < HID_COLS:
                 matrix[x, y] = float(pressure)
+                if x_local <= 16 and y_local <= 16:
+                    local_cells.append((x_local - 1) * 16 + (y_local - 1))
+                    rows.append(x)
+                    cols.append(y)
+
+        sector = _SECTOR_GRID[rows[0] // 16][cols[0] // 16] if rows else None
+        return sector, local_cells, rows, cols
 
     def close(self) -> None:
+        self._running = False
+        if self._rx_thread.is_alive():
+            self._rx_thread.join(timeout=1.0)
         if self._device is not None:
             self._device.close()
             self._device = None

@@ -18,8 +18,11 @@ _EDGE_SRC = os.path.abspath(
 if _EDGE_SRC not in sys.path:
     sys.path.insert(0, _EDGE_SRC)
 
+from pathlib import Path
+
 from database.db_local import LocalDatabase
 from hardware.serial_reader import BaseFrameReader
+from math_engine.spatial_baseline import SpatialBaseline
 from workers.acquisition_worker import AcquisitionWorker
 
 
@@ -59,6 +62,7 @@ def test_acquisition_worker_lifecycle_and_broadcast() -> None:
         maca_id="MACA-TEST-01",
         reader=reader,
         broadcast_callback=mock_broadcast,
+        baseline=SpatialBaseline(Path(temp_dir) / "baseline.json"),
     )
 
     try:
@@ -74,8 +78,8 @@ def test_acquisition_worker_lifecycle_and_broadcast() -> None:
         worker.update_param("posture_timeout_seconds", 1800)
         assert worker.params.posture_timeout_seconds == 1800
 
-        # Testa disparo de tara
-        worker.trigger_tare()
+        # Testa disparo de tara (primeira tara: sem referência, só exige estabilidade)
+        assert worker.trigger_tare()["accepted"] is True
         assert worker.tare_status()["collecting"] is True
 
     finally:

@@ -42,10 +42,26 @@ class EdgeClient:
         return _http_request("GET", "/api/v1/telemetry/live", timeout=1.0)
 
     @staticmethod
-    def trigger_tare() -> bool:
-        """Dispara amostragem de tara no serviço Edge."""
-        res = _http_request("POST", "/api/v1/calibration/tare", data={}, timeout=2.0)
-        return res is not None and res.get("status") == "ok"
+    def trigger_tare() -> tuple[bool, str | None]:
+        """Dispara amostragem de tara no serviço Edge. Devolve (aceita, motivo da recusa).
+
+        O Edge recusa (409) se a maca não estiver comprovadamente vazia, com movimento,
+        setor sem atualização ou manta desconectada.
+        """
+        req = urllib.request.Request(f"{EDGE_BASE_URL}/api/v1/calibration/tare", data=b"{}",
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=2.0) as response:
+                return response.status == 200, None
+        except urllib.error.HTTPError as ex:
+            try:
+                detail = json.loads(ex.read().decode("utf-8")).get("detail")
+            except Exception:
+                detail = None
+            return False, detail or f"HTTP {ex.code}"
+        except Exception as ex:
+            logger.debug("Edge service indisponível para a tara: %s", ex)
+            return False, "Edge service indisponível"
 
     @staticmethod
     def get_calibration_params() -> dict[str, Any] | None:

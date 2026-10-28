@@ -318,6 +318,35 @@ html, body {
     margin-top: 10px;
 }
 
+/* Peso atual, status e último válido, abaixo do peso validado */
+.weight-breakdown {
+    margin: 8px 0 0;
+    display: grid;
+    gap: 2px;
+    font-size: 11px;
+}
+
+.weight-breakdown div {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.weight-breakdown dt {
+    color: var(--text-muted);
+}
+
+.weight-breakdown dd {
+    margin: 0;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-main);
+    text-align: right;
+}
+
+.weight-breakdown dd.warn {
+    color: var(--samel-amber);
+}
+
 /* Stability progress inside Weight KPI */
 .stability-bar-container {
     width: 100%;

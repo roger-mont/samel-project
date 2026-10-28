@@ -23,6 +23,8 @@ apps/edge-service/data/*.db-journal
 
 # RAW completo dos experimentos (cerca de 5 MB por minuto) e baseline local da maca
 apps/edge-service/data/experiments/
+# Log de diagnóstico contínuo e eventos de tara (parecer de 20/10)
+apps/edge-service/data/diagnostics/
 apps/edge-service/data/gain_points.json
 apps/edge-service/data/*.tmp
 apps/edge-service/data/sessions/raw/

@@ -40,10 +40,10 @@ def get_sensor_data() -> dict[str, Any]:
 
 
 @eel.expose
-def trigger_tare() -> dict[str, str]:
-    """Dispara ciclo de tara no Edge Service."""
-    ok = EdgeClient.trigger_tare()
-    return {"status": "ok" if ok else "error"}
+def trigger_tare() -> dict[str, str | None]:
+    """Dispara ciclo de tara no Edge Service; em caso de recusa, devolve o motivo."""
+    ok, reason = EdgeClient.trigger_tare()
+    return {"status": "ok" if ok else "error", "reason": reason}
 
 
 @eel.expose
